@@ -49,7 +49,7 @@ class Agent:
         self.memory = ReplayBuffer(
             max_size=max_buffer_size,
             input_shape=obs.shape,
-            input_device='cpu',
+            input_device=self.device,
             output_device=self.device,
             action_dim=self.n_actions,
         )
