@@ -10,9 +10,10 @@ env = gym.make(
     n_trash=2,                 # trash items per episode
     max_steps=1000,            # steps before truncation
     map_name="default",             # map layout
+    goals=["trash"],
     subgoals=True,            # True for LLM orchestration mode
 )
 
 agent = Agent(env=env, max_buffer_size=200000)
 
-agent.train(episodes=1200, batch_size=32)
+agent.train(episodes=800, batch_size=32)

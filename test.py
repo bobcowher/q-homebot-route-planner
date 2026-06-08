@@ -1,7 +1,17 @@
 from agent import Agent
 import gymnasium as gym
+import homebot
 
-env = gym.make("CarRacing-v3", continuous=False, render_mode="human")
+env = gym.make(
+    "HomeBot2D-v1",
+    render_mode="human",
+    action_mode="continuous",
+    obs_resolution=(96, 96),
+    n_trash=2,
+    max_steps=1000,
+    map_name="default",
+    subgoals=True,
+)
 
 agent = Agent(env=env)
 
