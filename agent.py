@@ -23,8 +23,8 @@ class Agent:
         os.makedirs("checkpoints", exist_ok=True)
         os.makedirs("runs", exist_ok=True)
 
-        obs, _ = self.env.reset()
-        obs = self.process_observation(obs)
+        raw_obs, _ = self.env.reset()
+        obs = self.process_observation(raw_obs["observation"])
 
         self.n_actions = self.env.action_space.n  # type: ignore[union-attr]
 
@@ -135,8 +135,9 @@ class Agent:
         best_score = float("-inf")
 
         for episode in range(episodes):
-            obs, _ = self.env.reset()
-            obs = self.process_observation(obs)
+            raw_obs, _ = self.env.reset()
+            obs          = self.process_observation(raw_obs["observation"])
+            desired_goal = raw_obs["desired_goal"]
 
             done = False
             episode_reward = 0.0
@@ -145,16 +146,23 @@ class Agent:
 
             while not done:
                 action = self.select_action(obs)
-                next_obs, reward, term, trunc, _ = self.env.step(action)
-                next_obs = self.process_observation(next_obs)
+                raw_next, reward, term, trunc, _ = self.env.step(action)
+                next_obs = self.process_observation(raw_next["observation"])
                 done = term or trunc
 
-                self.episode_buffer.store(obs, action, reward, next_obs, done, achieved_goal=None)
+                self.episode_buffer.store(
+                    obs, action, reward, next_obs, done,
+                    achieved_goal=raw_next["achieved_goal"],
+                )
                 episode_reward += float(reward)
                 episode_steps  += 1
                 obs = next_obs
 
-            self.episode_buffer.flush_to(self.memory, desired_goal=None)
+            self.episode_buffer.flush_to(
+                self.memory,
+                desired_goal=desired_goal,
+                compute_reward=self.env.compute_reward,  # type: ignore[attr-defined]
+            )
             self.episode_buffer.clear()
 
             for _ in range(episode_steps):
@@ -185,8 +193,8 @@ class Agent:
         total_rewards = []
 
         for episode in range(episodes):
-            obs, _ = self.env.reset()
-            obs = self.process_observation(obs)
+            raw_obs, _ = self.env.reset()
+            obs = self.process_observation(raw_obs["observation"])
             done = False
             episode_reward = 0.0
 
@@ -194,8 +202,8 @@ class Agent:
                 with torch.no_grad():
                     obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
                     action = self.q_model(obs_t).argmax(dim=1).item()
-                next_obs, reward, term, trunc, _ = self.env.step(action)
-                next_obs = self.process_observation(next_obs)
+                raw_next, reward, term, trunc, _ = self.env.step(action)
+                next_obs = self.process_observation(raw_next["observation"])
                 done = term or trunc
                 episode_reward += float(reward)
                 obs = next_obs

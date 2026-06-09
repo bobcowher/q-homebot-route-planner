@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Callable
+import numpy as np
 import torch
 
 
@@ -10,7 +11,7 @@ class Transition:
     reward:        float
     next_obs:      torch.Tensor
     done:          bool
-    achieved_goal: Any  # environment-specific; filled in by agent
+    achieved_goal: np.ndarray  # robot pixel (x, y) at this step
 
 
 class EpisodeBuffer:
@@ -44,15 +45,20 @@ class EpisodeBuffer:
     def clear(self):
         self._transitions.clear()
 
-    def flush_to(self, replay_buffer, desired_goal):  # noqa: ARG002
+    def flush_to(
+        self,
+        replay_buffer,
+        desired_goal: np.ndarray,
+        compute_reward: Callable,
+    ) -> None:
         """Store original transitions, then hindsight-relabeled transitions.
 
-        TODO: implement goal relabeling once the environment exposes goal info.
-              Steps:
+        TODO: implement HER relabeling.
               1. Store each original transition as-is (reward from env).
-              2. For each step i, sample a hindsight goal from achieved_goals[i+1:].
-                 (strategy='future' — any achieved goal strictly after step i)
-              3. Recompute reward using hindsight goal.
+              2. For each step i, sample a hindsight goal from achieved_goals[i+1:]
+                 (strategy='future').
+              3. Relabeled reward = compute_reward(t.next_obs achieved_goal,
+                 hindsight_goal, {})  — batched, returns float32 0/1.
               4. Store the relabeled transition.
         """
         # --- original transitions ---
@@ -60,12 +66,15 @@ class EpisodeBuffer:
             replay_buffer.store_transition(t.obs, t.action, t.reward, t.next_obs, t.done)
 
         # --- hindsight transitions (TODO) ---
+        # import random
         # for i, t in enumerate(self._transitions):
         #     future = self._transitions[i + 1:]
         #     if not future:
         #         continue
         #     hindsight_goal = random.choice(future).achieved_goal
-        #     hindsight_reward = compute_reward(t.next_obs, hindsight_goal)
+        #     hindsight_reward = float(compute_reward(t.achieved_goal, hindsight_goal, {}))
         #     replay_buffer.store_transition(
         #         t.obs, t.action, hindsight_reward, t.next_obs, t.done
         #     )
+        _ = desired_goal  # will be used by hindsight block above
+        _ = compute_reward
