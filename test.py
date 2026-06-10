@@ -10,7 +10,8 @@ env = gym.make(
     n_trash=2,
     max_steps=1000,
     map_name="default",
-    goals=["collect_trash"],
+    goals=["go_to_fridge", "deliver_drink", "go_to_door", "deliver_package", "collect_trash"],
+    evaluate=True,
 )
 
 agent = Agent(env=env)
