@@ -25,7 +25,8 @@ tracked per experiment below.
 - `tuning-herk` (run 226): REGRESSION → reverted, branch deleted (not merged).
 - `tuning-polyak` (run 227): REGRESSION → reverted, branch deleted (not merged).
 - `tuning-lr` (run 228, LR 5e-5): WON → merged into `tuning`, branch deleted.
-- `tuning-lr3e5` (Exp 6): live — pending Exp 6 verdict.
+- `tuning-lr3e5` (run 229, LR 3e-5): REGRESSION → reverted, branch deleted.
+- `tuning-batch` (Exp 7): live — pending Exp 7 verdict.
 
 ---
 
@@ -145,7 +146,21 @@ Result after ~530 episodes:
   rising curve / lower success → revert. Either way we bracket the optimum.
 - **Change:** `agent.py` Adam `lr=0.00005` → `lr=0.00003`.
 - **Tag/branch:** `tuning-lr3e5`.
-- **Status:** RUNNING — run id below. Compare success rate vs new baseline (~35%).
+- **Run:** 229 — completed full 1000 episodes (33 min).
+- **Result vs baseline (Huber + LR 5e-5, ~35%):**
+  - success rate ~24–27% (tail count) vs ~35%; peak episode_reward 0.54 vs 0.59.
+  - Q-loss smoothed 3.45 vs 2.61; a ~20-episode cold streak returned (884–905).
+  - Likely undertrained in 1000 episodes (curve still rising).
+- **Verdict: REGRESSION → REVERT.** LR optimum is bracketed:
+  **3e-5 (~25%) < 1e-4 (~32%) < 5e-5 (~35%).** Kept LR 5e-5.
+
+### Exp 7 — batch size 64 → 128 (continue the "steadier updates" theme)
+- **Hypothesis:** both wins (Huber, lower LR) came from steadier updates. The
+  untried lever in that family is batch size: larger batches cut gradient variance
+  directly, which should reduce cold streaks / raise the floor past ~35%.
+- **Change:** `train.py` `agent.train(..., batch_size=64)` → `batch_size=128`.
+- **Tag/branch:** `tuning-batch`.
+- **Status:** RUNNING — run id below. Compare success rate vs baseline (~35%).
 
 > **Meta-note:** n=1 run per config; the 18–35% reward band is partly seed noise.
 > Huber is the one robust win (Q-loss 69→3 is consistent, not noise). If LR also
