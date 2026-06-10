@@ -23,7 +23,8 @@ tracked per experiment below.
 - `tuning-huber` (run 224): WON → merged into `tuning`, branch deleted.
 - `tuning-gamma` (run 225): NEUTRAL → reverted, branch deleted (not merged).
 - `tuning-herk` (run 226): REGRESSION → reverted, branch deleted (not merged).
-- `tuning-polyak` (Exp 4): live — pending Exp 4 verdict.
+- `tuning-polyak` (run 227): REGRESSION → reverted, branch deleted (not merged).
+- `tuning-lr` (Exp 5): live — pending Exp 5 verdict.
 
 ---
 
@@ -110,4 +111,26 @@ Result after ~530 episodes:
   `total_steps % target_update_interval` hard copy with a per-step soft update
   `tp = (1-tau)*tp + tau*p`. (On clean Huber baseline, K=4, gamma 0.99.)
 - **Tag/branch:** `tuning-polyak`.
+- **Run:** 227 — completed full 1000 episodes (36 min).
+- **Result vs Exp 1 (Huber, ~32%):**
+  - success rate ~17–18% (tail count) vs ~32%; peak episode_reward 0.49 vs 0.57.
+  - Q-loss *noisier*: smoothed 6.68, spikes to 502 (vs 3.15 / 186).
+  - Severe ~30-episode dry patch (ep 843–874).
+- **Verdict: REGRESSION → REVERT.** With 800 grad-steps/episode, tau=0.005 every
+  step tracks the online net ~98%/episode — *tighter* coupling than the hard sync,
+  so it amplified the target-chasing feedback instead of damping it. Rolled back to
+  hard target update. Lesson: this system is over-aggressive on updates.
+
+### Exp 5 — learning rate 1e-4 → 5e-5 (calm the over-aggressive updates)
+- **Hypothesis:** Polyak made things worse by tightening update coupling → the
+  system is over-stepping. The persistent signature across all runs is policy
+  thrashing (cold streaks) on a noisy ~18–35% band. Halving the LR, now safe under
+  stable Huber loss, should let the policy settle into a steadier, higher floor.
+- **Change:** `agent.py` Adam `lr=0.0001` → `lr=0.00005`. (Clean Huber baseline.)
+- **Tag/branch:** `tuning-lr`.
 - **Status:** RUNNING — run id below. Compare success rate vs Exp 1 (~32%).
+
+> **Meta-note:** n=1 run per config; the 18–35% reward band is partly seed noise.
+> Huber is the one robust win (Q-loss 69→3 is consistent, not noise). If LR also
+> lands within the band, treat ~32% as a noise-limited plateau — the remaining
+> ceiling is likely representational/exploration, not a single hyperparameter.
