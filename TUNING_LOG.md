@@ -24,7 +24,8 @@ tracked per experiment below.
 - `tuning-gamma` (run 225): NEUTRAL → reverted, branch deleted (not merged).
 - `tuning-herk` (run 226): REGRESSION → reverted, branch deleted (not merged).
 - `tuning-polyak` (run 227): REGRESSION → reverted, branch deleted (not merged).
-- `tuning-lr` (Exp 5): live — pending Exp 5 verdict.
+- `tuning-lr` (run 228, LR 5e-5): WON → merged into `tuning`, branch deleted.
+- `tuning-lr3e5` (Exp 6): live — pending Exp 6 verdict.
 
 ---
 
@@ -127,9 +128,24 @@ Result after ~530 episodes:
   thrashing (cold streaks) on a noisy ~18–35% band. Halving the LR, now safe under
   stable Huber loss, should let the policy settle into a steadier, higher floor.
 - **Change:** `agent.py` Adam `lr=0.0001` → `lr=0.00005`. (Clean Huber baseline.)
-- **Tag/branch:** `tuning-lr`.
-- **Run:** 228.
-- **Status:** RUNNING — compare success rate vs Exp 1 (~32%).
+- **Tag/branch:** `tuning-lr` (= LR 5e-5).
+- **Run:** 228 — completed full 1000 episodes (32 min).
+- **Result vs Exp 1 (Huber, ~32%):**
+  - success rate ~34–37% (tail count) vs ~32% — modestly up.
+  - Q-loss smoothed **2.61**, max spike **154** — best of every run so far.
+  - Cold streaks fewer/shorter (longest dry patch ~8 vs 20–30 prior).
+- **Verdict: WIN — KEEP.** Reward, Q-stability, and cold-streaks all improved
+  *together* (coherent, not the noisy reward-only bump gamma gave). Folded into
+  `tuning`. New baseline = Huber + LR 5e-5, ~35% success. Evidence: calmer = better.
+
+### Exp 6 — learning rate 5e-5 → 3e-5 (bracket the LR optimum)
+- **Hypothesis:** LR 5e-5 beat 1e-4 on every axis; continue the winning direction
+  to find the optimum. 3e-5 may further steady the policy (fewer cold streaks,
+  higher floor) — or undertrain within 1000 episodes, which would show as a still-
+  rising curve / lower success → revert. Either way we bracket the optimum.
+- **Change:** `agent.py` Adam `lr=0.00005` → `lr=0.00003`.
+- **Tag/branch:** `tuning-lr3e5`.
+- **Status:** RUNNING — run id below. Compare success rate vs new baseline (~35%).
 
 > **Meta-note:** n=1 run per config; the 18–35% reward band is partly seed noise.
 > Huber is the one robust win (Q-loss 69→3 is consistent, not noise). If LR also
