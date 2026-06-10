@@ -26,7 +26,8 @@ tracked per experiment below.
 - `tuning-polyak` (run 227): REGRESSION → reverted, branch deleted (not merged).
 - `tuning-lr` (run 228, LR 5e-5): WON → merged into `tuning`, branch deleted.
 - `tuning-lr3e5` (run 229, LR 3e-5): REGRESSION → reverted, branch deleted.
-- `tuning-batch` (Exp 7): live — pending Exp 7 verdict.
+- `tuning-batch` (run 230, batch 128): NEUTRAL → reverted, branch deleted.
+- `tuning-episodes` (Exp 8): live — pending Exp 8 verdict.
 
 ---
 
@@ -160,7 +161,24 @@ Result after ~530 episodes:
   directly, which should reduce cold streaks / raise the floor past ~35%.
 - **Change:** `train.py` `agent.train(..., batch_size=64)` → `batch_size=128`.
 - **Tag/branch:** `tuning-batch`.
-- **Status:** RUNNING — run id below. Compare success rate vs baseline (~35%).
+- **Run:** 230 — completed full 1000 episodes (40 min, slower).
+- **Result vs baseline (Huber + LR 5e-5, ~35%):**
+  - success rate ~24–34% (tail count, avg ~30%) vs ~35%; peak 0.60 ≈ 0.59.
+  - Q-loss smoothed 3.70 vs 2.61; cold streaks back (15–19 ep dry patches).
+- **Verdict: NEUTRAL → REVERT.** No gain, slightly noisier, slower. Kept batch 64.
+
+### Exp 8 — episodes 1000 → 2500 (undertraining vs structural ceiling)
+- **Hypothesis:** the decisive test before declaring a ceiling. *Every* run's
+  reward curve is still trending "improving" at ep 999, so ~35% may be
+  undertraining, not a true ceiling. 1000 episodes is a pre-existing default (not
+  a deliberate user choice). 2.5× the training on the best baseline either climbs
+  well past 35% (→ undertrained, keep going) or plateaus (→ structural ceiling;
+  remaining gap needs architecture/exploration/reward changes — a design decision
+  for Robert, not single-variable tuning → end loop and report).
+- **Change:** `train.py` `episodes=1000` → `episodes=2500`. (Best baseline:
+  Huber + LR 5e-5 + batch 64 + K=4 + gamma 0.99.)
+- **Tag/branch:** `tuning-episodes`.
+- **Status:** RUNNING — run id below. ~80 min run; judge at completion vs ~35%.
 
 > **Meta-note:** n=1 run per config; the 18–35% reward band is partly seed noise.
 > Huber is the one robust win (Q-loss 69→3 is consistent, not noise). If LR also
