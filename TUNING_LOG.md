@@ -22,7 +22,8 @@ tracked per experiment below.
 ### Branch cleanup ledger
 - `tuning-huber` (run 224): WON → merged into `tuning`, branch deleted.
 - `tuning-gamma` (run 225): NEUTRAL → reverted, branch deleted (not merged).
-- `tuning-herk` (Exp 3): live — pending Exp 3 verdict.
+- `tuning-herk` (run 226): REGRESSION → reverted, branch deleted (not merged).
+- `tuning-polyak` (Exp 4): live — pending Exp 4 verdict.
 
 ---
 
@@ -88,4 +89,25 @@ Result after ~530 episodes:
   which should lift the success rate where gamma couldn't. Single HER variable.
 - **Change:** `episode_buffer.py` `K = 4` → `K = 8`. (On clean Huber baseline.)
 - **Tag/branch:** `tuning-herk`.
+- **Run:** 226 — completed full 1000 episodes (38 min).
+- **Result vs Exp 1 (Huber, ~32%):**
+  - success rate ~21% (tail count) vs ~32%; peak episode_reward 0.45 vs 0.57.
+  - Longer cold streaks (e.g. ~28 consecutive failures, ep 881–909).
+  - Q-loss smoothed 3.15 → 8.70 (worse).
+- **Verdict: REGRESSION → REVERT.** Doubling relabels floods the buffer with
+  easy near-future goals, shrinking the share of real desired-goal transitions →
+  policy overfits trivial nearby goals, generalizes worse to distant trash.
+  Rolled back to K=4 (clean Huber baseline on `tuning`).
+
+### Exp 4 — Polyak soft target updates (replace hard update every 1000 steps)
+- **Hypothesis:** three levers in, the wall is policy *instability across
+  episodes* (cold streaks), not value reach or signal density. Hard target sync
+  every 1000 grad-steps (≈ once/episode with 800/ep) makes the bootstrap target
+  lurch once per episode. Polyak (tau=0.005, every step) tracks the online net
+  smoothly → steadier targets → fewer cold streaks, higher floor. Pairs with the
+  Huber stability story.
+- **Change:** `agent.py` — add `self.tau = 0.005`; in train_step replace the
+  `total_steps % target_update_interval` hard copy with a per-step soft update
+  `tp = (1-tau)*tp + tau*p`. (On clean Huber baseline, K=4, gamma 0.99.)
+- **Tag/branch:** `tuning-polyak`.
 - **Status:** RUNNING — run id below. Compare success rate vs Exp 1 (~32%).
