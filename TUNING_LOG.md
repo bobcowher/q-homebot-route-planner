@@ -27,7 +27,9 @@ tracked per experiment below.
 - `tuning-lr` (run 228, LR 5e-5): WON → merged into `tuning`, branch deleted.
 - `tuning-lr3e5` (run 229, LR 3e-5): REGRESSION → reverted, branch deleted.
 - `tuning-batch` (run 230, batch 128): NEUTRAL → reverted, branch deleted.
-- `tuning-episodes` (Exp 8): live — pending Exp 8 verdict.
+- `tuning-episodes` (run 231, 2500 ep): NO BENEFIT → reverted, branch deleted.
+
+All `tuning-*` experiment branches deleted; only `tuning` remains (best config).
 
 ---
 
@@ -178,9 +180,64 @@ Result after ~530 episodes:
 - **Change:** `train.py` `episodes=1000` → `episodes=2500`. (Best baseline:
   Huber + LR 5e-5 + batch 64 + K=4 + gamma 0.99.)
 - **Tag/branch:** `tuning-episodes`.
-- **Status:** RUNNING — run id below. ~80 min run; judge at completion vs ~35%.
+- **Run:** 231 — completed full 2500 episodes (1h22m).
+- **Result vs baseline (Huber + LR 5e-5, ~35%):**
+  - success rate at ep 1000 ~35%, ep 1850 ~35%, ep 2400–2499 ~30–36%.
+    **Flat across 2.5× the training.** Reward EMA peaked ~0.66 near ep 1870 then
+    settled back to ~0.49; cold streaks persisted throughout (e.g. 2351–2366).
+  - Q-loss drifted up late (smoothed ~11 by ep 2500) — more training did not even
+    keep loss tighter.
+- **Verdict: NO BENEFIT → REVERT** to episodes=1000. **The ~35% plateau is a
+  structural ceiling, not undertraining.** This was the decisive test.
 
 > **Meta-note:** n=1 run per config; the 18–35% reward band is partly seed noise.
-> Huber is the one robust win (Q-loss 69→3 is consistent, not noise). If LR also
-> lands within the band, treat ~32% as a noise-limited plateau — the remaining
-> ceiling is likely representational/exploration, not a single hyperparameter.
+> Huber is the one robust win (Q-loss 69→3 is consistent, not noise). LR 5e-5
+> landed at the top of the band with the cleanest stability, so it was kept; the
+> ceiling test (Exp 8) confirmed ~35% is a noise-limited plateau — the remaining
+> gap is representational/exploration, not a single hyperparameter.
+
+---
+
+## Final Summary (session end)
+
+**Result.** Took the agent from a diverging-Q baseline (~26%, Q-loss spiking to
+4600) to a **stable ~35% success rate** on `collect_trash`. Two changes did all
+the work, and both are about *calmer, steadier updates*:
+
+| # | Change | Verdict | Why |
+|---|--------|---------|-----|
+| 1 | MSE → **Huber loss** | ✅ KEEP | Killed Q divergence (loss 69→3 smoothed). |
+| 5 | LR 1e-4 → **5e-5** | ✅ KEEP | Best stability + top of reward band; fewer cold streaks. |
+| 2 | gamma 0.99→0.995 | ↩ revert | Reward gain within noise, cost Q-stability. |
+| 3 | HER K 4→8 | ↩ revert | Buffer flooded with easy near goals; regressed to ~21%. |
+| 4 | Polyak τ=0.005 | ↩ revert | Tighter target coupling → *more* thrash (~18%). |
+| 6 | LR 5e-5→3e-5 | ↩ revert | Undertrained/worse (~25%); brackets optimum at 5e-5. |
+| 7 | batch 64→128 | ↩ revert | No gain, slightly noisier, slower. |
+| 8 | episodes 1000→2500 | ↩ revert | **Flat at ~35% — ceiling, not undertraining.** |
+
+**Current best config on `tuning`:** Huber loss · LR 5e-5 · batch 64 · HER K=4 ·
+gamma 0.99 · 800 grad-steps/episode · epsilon 1.0→0.1 (min by ep 100) · hard
+target update / 1000 steps · episodes 1000. TB runs 224 & 228 are the keepers.
+
+**The wall (for discussion — structural, not tuning).** Failure mode is constant:
+the agent solves quickly when it *starts near* the trash (1–120 steps) but burns
+the full 1000 steps and scores 0 when it starts far. `best_score=1` every run, so
+the architecture *can* represent the solution — it just can't reliably navigate
+long distances. Single-hyperparameter tuning is exhausted; the remaining 35→~100%
+gap needs a design change. Candidates, roughly in order of expected payoff:
+
+1. **Start-distance curriculum** — begin episodes near the goal, expand the radius
+   as success rises. The textbook fix for sparse long-horizon navigation; directly
+   attacks the distant-start failure.
+2. **Relative goal in the observation** — feed the goal as an egocentric vector
+   (Δx, Δy) alongside the image, so the policy doesn't have to infer self-position
+   from a 96×96 frame to plan a long path.
+3. **Shorter `max_steps` during training** (e.g. 200–400) — denser learning signal
+   per env-step and far faster iteration; lengthen later as a curriculum.
+4. **n-step returns** — propagate sparse reward across long horizons more directly
+   than a gamma bump (which we saw destabilizes).
+5. **Exploration** — count/novelty bonus, or revisit the epsilon floor; the greedy
+   policy may simply never *experience* reaching far goals to learn from.
+
+Loop ended here per the stop condition: a structural ceiling, not a tuning knob.
+All experiment branches cleaned up; `tuning` holds the best config.
