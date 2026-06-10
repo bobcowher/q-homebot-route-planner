@@ -21,7 +21,8 @@ tracked per experiment below.
 
 ### Branch cleanup ledger
 - `tuning-huber` (run 224): WON → merged into `tuning`, branch deleted.
-- `tuning-gamma` (Exp 2): live — pending Exp 2 verdict.
+- `tuning-gamma` (run 225): NEUTRAL → reverted, branch deleted (not merged).
+- `tuning-herk` (Exp 3): live — pending Exp 3 verdict.
 
 ---
 
@@ -69,4 +70,22 @@ Result after ~530 episodes:
   Huber + grad-clip should contain the larger targets.
 - **Change:** `agent.py` `self.gamma = 0.99` → `0.995`. (On top of Huber.)
 - **Tag/branch:** `tuning-gamma`.
-- **Status:** RUNNING — run id recorded below. Compare success rate vs Exp 1 (~32%).
+- **Run:** 225 — completed full 1000 episodes (34 min).
+- **Result vs Exp 1 (Huber, ~32%):**
+  - success rate ~34–35% (tail count) vs ~32%; peak episode_reward 0.61 vs 0.57.
+    Marginal, within episode-to-episode noise.
+  - Q-loss smoothed 3.15 → **5.23**, spikes 186 → **369** — noisier (expected:
+    larger targets), still far better than pre-Huber baseline.
+  - Dominant failure mode unchanged: ~2/3 of episodes still burn all 1000 steps.
+    Gamma alone did not crack long-horizon navigation.
+- **Verdict: NEUTRAL → REVERT.** Gain within noise, costs Q-stability and muddies
+  the story. Rolled back to gamma 0.99 (clean Huber baseline on `tuning`).
+
+### Exp 3 — HER K 4 → 8 (denser hindsight signal for navigation)
+- **Hypothesis:** the failure mode is reaching *distant* goals. HER's whole job is
+  to teach "how to get to arbitrary positions" by relabeling. More hindsight goals
+  per transition (K 8 vs 4) doubles the relabeled navigation signal per episode,
+  which should lift the success rate where gamma couldn't. Single HER variable.
+- **Change:** `episode_buffer.py` `K = 4` → `K = 8`. (On clean Huber baseline.)
+- **Tag/branch:** `tuning-herk`.
+- **Status:** RUNNING — run id below. Compare success rate vs Exp 1 (~32%).
