@@ -1,6 +1,6 @@
 # HER Implementation Design
 
-**Branch:** `her`
+**Branch:** `her` (already checked out)
 **Date:** 2026-06-09
 
 ## Overview
@@ -32,9 +32,9 @@ Add a `goal_memory` tensor `(max_size, goal_dim)` float32 on `input_device`.
 - `store_transition(state, action, reward, next_state, done, goal)` — `goal` is a `(2,)` float32 numpy array
 - `sample_buffer(batch_size)` returns a 6-tuple: `states, actions, rewards, next_states, dones, goals`
 
-### 3. `episode_buffer.py` — HER relabeling in `flush_to`
+### 3. `episode_buffer.py` — HER relabeling in `send_to`
 
-`flush_to(replay_buffer, desired_goal, compute_reward)` does two passes:
+`send_to(replay_buffer, desired_goal, compute_reward)` does two passes:
 
 **Pass 1 — original transitions:**
 Store each transition with `desired_goal` (the episode's actual goal) and the env-computed reward as-is.
@@ -64,7 +64,7 @@ Result: up to 5× buffer density per episode (1 original + up to 4 hindsight per
 **Training loop (`train`):**
 - Capture `desired_goal = raw_obs["desired_goal"]` at episode reset — stable for the full episode
 - Pass `desired_goal` to `select_action` at every step
-- Pass `desired_goal` + `env.unwrapped.compute_reward` to `flush_to` at episode end
+- Pass `desired_goal` + `env.unwrapped.compute_reward` to `send_to` at episode end
 
 ---
 
@@ -83,7 +83,7 @@ per step:
   episode_buffer.store(..., achieved_goal)
 
 end of episode:
-  flush_to(memory, desired_goal, compute_reward)
+  send_to(memory, desired_goal, compute_reward)
     ├─ original transitions  → memory  (goal = desired_goal)
     └─ hindsight transitions → memory  (goal = sampled future achieved_goal)
   episode_buffer.clear()
@@ -110,5 +110,5 @@ train_step:
 |------|--------|
 | `models/q_model.py` | Add `goal_dim`, `goal_encoder`, update `forward` signature |
 | `buffer.py` | Add `goal_memory`, update `store_transition` and `sample_buffer` |
-| `episode_buffer.py` | Implement HER relabeling loop in `flush_to` |
+| `episode_buffer.py` | Implement HER relabeling loop in `send_to` |
 | `agent.py` | Thread `goal` through `select_action`, `train_step`, `train`, `test` |
