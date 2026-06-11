@@ -241,3 +241,61 @@ gap needs a design change. Candidates, roughly in order of expected payoff:
 
 Loop ended here per the stop condition: a structural ceiling, not a tuning knob.
 All experiment branches cleaned up; `tuning` holds the best config.
+
+---
+
+## Day 2 (2026-06-10): The "structural ceiling" was a bug — ours, not the env's
+
+### Exp 9 — gamma 0.995 redux (clean A/B on the best config)
+
+- **Hypothesis:** the overnight gamma test (Exp 2) was confounded — it ran on
+  the *old* LR 1e-4 baseline before the LR 5e-5 win landed. Re-test gamma 0.995
+  on top of Huber + 5e-5.
+- **Branch/tag:** `tuning-gamma-redux` · **Run:** 232
+- **Result:** 100-ep success windows 21–27% all the way to the end (final two
+  windows 27%, 26%) vs ~35% baseline. avg_q_loss spiked to 236–283 repeatedly —
+  the hindsight Q-inflation bound is 1/(1-gamma), and 0.995 doubles it (see below).
+- **Verdict:** ↩ REVERT, final. gamma 0.99 stands. The Day-1 verdict was right
+  for a partially wrong reason.
+
+### Code review: three structural bugs found (while Exp 9 ran)
+
+1. **HER hindsight transitions never terminated.** The env terminates on success
+   (`terminated = reward > 0.5`), so real successes store `done=True` → target
+   exactly 1. Hindsight relabels reused the original `t.done` (≈always False), so
+   relabeled successes bootstrapped past the goal: target 1 + γ·maxQ, compounding
+   toward 1/(1-γ) ≈ 100. With K=4, ~80% of the buffer carried this corrupted
+   signal. Huber loss had been masking the symptom since Exp 1.
+2. **Truncation stored as terminal.** `done = term or trunc` went into the buffer,
+   training Q toward exactly 0 at timeout states — i.e. far-from-goal states.
+   This is precisely the observed failure mode (solves near, fails far).
+3. **Unnormalized goal coords.** Raw map pixels (≤864) fed a Xavier-init Linear
+   while the obs branch got /255 inputs. With n_trash=2 and identical sprites,
+   the goal vector is the *only* disambiguator — and it was the worst-scaled input.
+
+### Bugfix run — all three fixes
+
+- **Branch/tag:** `bugfix-her-done` (commit 40cc148) · **Run:** 233 · gamma 0.99
+- **Changes:** hindsight `done = reward > 0.5`; buffer stores `term` not
+  `term or trunc`; `QModel.encode_goal()` scales goals to [0,1]. Regression test
+  added (`test_hindsight_success_is_terminal`).
+- **Result (100-ep success windows):** ramp to **56%** (eps 620–719), 49%
+  (720–819), 47% (800–899), 35% (900–999, two cold streaks). Smoothed reward
+  peaked **0.74** at ep 849 — baseline never broke ~0.55 in eight runs.
+  avg_q_loss ~1e-4 smoothed, **zero** inflation spikes (Exp 9 spiked to 283).
+  Far-start solves throughout: successes at 768, 851, 960, 638, 563 steps —
+  the "can't navigate distance" failure mode is broken.
+- **Verdict:** ✅ KEEP — biggest single win of the project. Day-1's "structural
+  ceiling at 35%" was these bugs, primarily #1.
+- **Caveat:** final-100 window dipped back to 35% (cold streaks eps 895–903,
+  953–964). Late-run wobble is worth one confirming run and/or an epsilon-floor
+  look before declaring a new plateau number.
+
+### Where this leaves the knobs
+
+The Day-1 hyperparameter verdicts were all measured against a corrupted target
+landscape. Huber + LR 5e-5 likely remain sensible, but everything else deserves
+a cheap re-check on fixed code if we keep tuning. Next levers, in order:
+epsilon floor (0.1 → 0.05/decayed; 10% random actions is now the binding noise),
+then the Day-1 structural list (curriculum, relative-goal obs) for the remaining
+gap to consistent 1s.
