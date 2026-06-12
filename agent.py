@@ -103,11 +103,6 @@ class Agent:
     def save(self):
         self.q_model.save_the_model("q_model", verbose=True)
 
-    def save_best(self, score, episode):
-        path = "checkpoints/best.pt"
-        torch.save({"episode": episode, "score": score, "q_model": self.q_model.state_dict()}, path)
-        print(f"Saved best checkpoint | episode: {episode} | score: {score:.1f}")
-
     def load(self):
         self.q_model.load_the_model("q_model", device=self.device)
         self.target_q_model.load_state_dict(self.q_model.state_dict())
@@ -131,8 +126,6 @@ class Agent:
                 run_tag = 'unknown'
 
         writer = SummaryWriter(f'runs/{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_{run_tag}')
-
-        best_score = float("-inf")
 
         for episode in range(episodes):
             raw_obs, _ = self.env.reset()
@@ -174,15 +167,10 @@ class Agent:
 
             self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
 
-            if episode_reward > best_score:
-                best_score = episode_reward
-                self.save_best(best_score, episode)
-
             avg_loss = episode_loss / episode_steps if episode_steps > 0 else 0.0
             print(f"Episode {episode} | reward: {episode_reward:.1f} | epsilon: {self.epsilon:.3f} | steps: {episode_steps}")
 
             writer.add_scalar("Train/episode_reward", episode_reward, episode)
-            writer.add_scalar("Train/best_score",     best_score,     episode)
             writer.add_scalar("Train/epsilon",         self.epsilon,   episode)
             writer.add_scalar("Train/avg_q_loss",      avg_loss,       episode)
             writer.add_scalar("Train/episode_steps",   episode_steps,  episode)

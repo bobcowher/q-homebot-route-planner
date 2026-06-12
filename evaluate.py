@@ -102,7 +102,7 @@ def main():
     parser.add_argument("--episodes", type=int, default=100)
     parser.add_argument(
         "--checkpoints", nargs="+",
-        default=["checkpoints/q_model.pt", "checkpoints/best.pt"],
+        default=["checkpoints/q_model.pt"],
     )
     parser.add_argument(
         "--epsilon", type=float, default=0.0,
