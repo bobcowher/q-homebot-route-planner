@@ -386,3 +386,21 @@ gap to consistent 1s.
   no goal coords) — search/wandering for trash, fixture locations learned in
   weights. The goal-conditioned net survives as the "go to pose" skill for a
   future hierarchical stack.
+
+#### Exp 13 result (run 237, 1h41m)
+
+- **Mid-run:** windows 75% (1151–1250), **80%** (1251–1350), two perfect 10/10
+  decades, peak smoothed reward **0.94 at ep 1293** — all project records,
+  reached ~1000 episodes earlier than 236's peak.
+- **Late fade:** final window (2400–2499) dropped to **56%**. Final checkpoint
+  evals at **45% greedy / 65% eps-0.1** — barely above 236 (43/63), because the
+  ep-2499 weights are from the faded stretch. The peak policy (~ep 1300) was
+  never captured: best.pt was removed and nothing replaced it.
+- **Verdict:** ✅ KEEP (merged). Relative goal clearly learns faster and higher;
+  the end-state regression is a late-training-instability + checkpoint-selection
+  problem, not a representation problem. Greedy-gap question remains open —
+  could not test the peak policy.
+- **Lessons → carried into V1 port:** (1) save a `q_model_best` checkpoint on
+  best rolling-100 success rate, every run, so eval can test the peak policy;
+  (2) late-run fade at 200k buffer appears once the buffer is dominated by
+  long failure episodes — future lever: LR decay or larger buffer late.
