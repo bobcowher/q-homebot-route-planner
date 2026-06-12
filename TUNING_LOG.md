@@ -322,3 +322,25 @@ gap to consistent 1s.
   and the missing ingredient is fresh far-start data, not more passes over the
   buffer. Watch for a stall near 0.8 average — that may be the epsilon-0.1 floor,
   not a ceiling; check greedy test() before tuning further.
+
+### Exp 11 — episodes 2500 (run past the old cap)
+
+- **Hypothesis:** run 234 was still climbing at the 1000-episode cap; more
+  episodes (fresh far-start data) beats more grad-steps (replay ratio already
+  ~8:1 at run end).
+- **Branch/tag:** `tuning-episodes-2500` · **Run:** 236 · 70 min
+- **Result (100-ep success windows, log tail):** ~72% (2233–2299 partial),
+  **68%** (2300–2399), **66%** (2400–2499). Peak smoothed reward **0.888 at
+  ep 2123** — new project record (234 peaked 0.86). Loss clean end to end
+  (~7e-5 final, only spikes were eps 126–212). Failures are almost all full
+  1000-step timeouts in streaks (e.g. 2394–2400) — far-start geometries, not
+  near-misses. Median success well under 150 steps.
+- **Verdict:** ✅ KEEP. Curve climbed well past ep 1000, confirming the
+  more-episodes call; then flattened in the 0.66–0.72 band around ep ~2100.
+- **Next (Exp 12):** the predicted stall-near-0.8 arrived. Before tuning,
+  measure the greedy policy with `evaluate.py` (100 episodes, epsilon=0) on
+  the downloaded checkpoint. Greedy ≈80%+ → the gap is the epsilon-0.1 floor,
+  try 0.05. Greedy ≈65% → floor is not the story, look at far-start geometry
+  (curriculum / relative-goal obs).
+- **Note:** `best.pt` is useless with binary rewards — `save_best` fires on the
+  first 1.0 (ep 18 here) and never again. The real artifact is `q_model.pt`.
