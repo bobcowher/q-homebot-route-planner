@@ -26,7 +26,8 @@ def main():
     obs, _ = env.reset()
     img = cv2.resize(obs, (384, 384), interpolation=cv2.INTER_NEAREST)
     cv2.imwrite("obs_v1.png", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-    print(f"Saved obs_v1.png | raw obs shape: {obs.shape}")
+    cv2.imwrite("obs_v1_raw.png", cv2.cvtColor(obs, cv2.COLOR_RGB2BGR))
+    print(f"Saved obs_v1.png (4x) + obs_v1_raw.png | raw obs shape: {obs.shape}")
 
 
 if __name__ == "__main__":
