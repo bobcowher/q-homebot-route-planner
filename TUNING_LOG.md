@@ -344,3 +344,22 @@ gap to consistent 1s.
   (curriculum / relative-goal obs).
 - **Note:** `best.pt` is useless with binary rewards — `save_best` fires on the
   first 1.0 (ep 18 here) and never again. The real artifact is `q_model.pt`.
+
+### Exp 12 — greedy eval (local, evaluate.py, 100 eps/condition)
+
+- **Setup:** downloaded run-236 checkpoints, `evaluate.py` matches train.py env
+  config exactly. Conditions: greedy (eps=0) vs eps=0.1 (training conditions).
+- **Result:**
+  - `q_model.pt` greedy: **43%** (avg 57 steps on success)
+  - `q_model.pt` eps=0.1: **63%** — reproduces the training chart, so the local
+    env matches remote; no eval confound.
+  - `best.pt` greedy: 10%, every success at 1–3 steps → pure spawn-on-goal
+    freebies (~10% base rate, inflates all numbers).
+- **Verdict:** ❌ epsilon-floor hypothesis REJECTED, inverted. The deterministic
+  policy is *worse* than the noisy one: greedy loops/stalls on far starts and
+  burns the 1000-step budget; the 10% random actions were breaking those loops.
+  Dropping the floor to 0.05 would likely hurt. Real success rate of the policy
+  itself is 43% (33% excluding spawn freebies).
+- **Next levers:** the problem is far-start brittleness in the Q landscape, not
+  exploration. Candidates from the Day-1 structural list: relative-goal obs
+  (goal - achieved as input), spawn curriculum (near→far), or longer training.
