@@ -9,8 +9,9 @@ class QModel(BaseModel):
                  goal_scale=(864.0, 576.0)):
         super(QModel, self).__init__()
 
-        # Goal coords arrive as raw map pixels (default map: 864x576). Scale to
-        # [0, 1] so the goal encoder sees the same input range as the obs branch.
+        # Goals arrive as relative displacements in raw map pixels
+        # (goal - robot position, default map: 864x576). Scale to [-1, 1] so
+        # the goal encoder sees the same input range as the obs branch.
         self.register_buffer("goal_scale", torch.tensor(goal_scale, dtype=torch.float32))
 
         self.conv1 = nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=4)
@@ -36,7 +37,7 @@ class QModel(BaseModel):
         return x.flatten(1)
 
     def encode_goal(self, goal):
-        """Scale raw pixel goal coords to [0, 1] and encode. All goal encoding
+        """Scale raw pixel displacement to [-1, 1] and encode. All goal encoding
         must go through here so the scaling can't be bypassed."""
         return self.goal_encoder(goal / self.goal_scale)
 

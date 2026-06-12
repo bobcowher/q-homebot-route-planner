@@ -65,9 +65,8 @@ def evaluate(model, env, episodes, device, epsilon=0.0):
     for episode in range(episodes):
         raw_obs, _ = env.reset()
         obs = process_observation(raw_obs["observation"])
-        goal_t = torch.as_tensor(
-            raw_obs["desired_goal"], dtype=torch.float32, device=device
-        ).unsqueeze(0)
+        desired_goal = raw_obs["desired_goal"]
+        pos = raw_obs["achieved_goal"]
 
         done = False
         steps = 0
@@ -79,9 +78,14 @@ def evaluate(model, env, episodes, device, epsilon=0.0):
             else:
                 with torch.no_grad():
                     obs_t = obs.unsqueeze(0).float().to(device) / 255.0
+                    # Relative goal changes every step as the robot moves.
+                    goal_t = torch.as_tensor(
+                        desired_goal - pos, dtype=torch.float32, device=device
+                    ).unsqueeze(0)
                     action = model(obs_t, goal_t).argmax(dim=1).item()
             raw_next, reward, term, trunc, _ = env.step(action)
             obs = process_observation(raw_next["observation"])
+            pos = raw_next["achieved_goal"]
             done = term or trunc
             episode_reward += float(reward)
             steps += 1

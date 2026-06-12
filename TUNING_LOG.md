@@ -363,3 +363,26 @@ gap to consistent 1s.
 - **Next levers:** the problem is far-start brittleness in the Q landscape, not
   exploration. Candidates from the Day-1 structural list: relative-goal obs
   (goal - achieved as input), spawn curriculum (near→far), or longer training.
+
+### Exp 13 — relative goal observation (frame-mismatch fix)
+
+- **Hypothesis:** inspect_obs.py showed the obs is a robot-centered viewport
+  covering 60% of the map — egocentric. Absolute goal coords force the net to
+  do implicit landmark localization before it can aim (goal invisible at spawn
+  in ~half of episodes). Feeding `goal - robot_position` (the robot-frame goal,
+  i.e. what odometry gives a real robot) matches the view frame and should
+  collapse far-goal geometries onto the same input pattern. Hindsight successes
+  all map to displacement ~0, sharpening HER too.
+- **Implementation:** relative goal changes within a transition, so the buffer
+  stores both `goal - pos_t` (for Q(s,g)) and `goal - pos_t+1` (for the
+  bootstrap target). Rewards still computed on absolutes. Goal scale now maps
+  displacements to [-1, 1].
+- **Branch/tag:** `tuning-relative-goal` · episodes 2500
+- **Bar:** beat run 236 (peak 0.888, late windows 66–68%) on windows, and beat
+  43% greedy on evaluate.py — greedy eval is the real metric now.
+- **Context:** this is the last goal-env experiment. Decision made with Robert:
+  the goal env was HER scaffolding; after banking this nav primitive, the main
+  line pivots to plain HomeBot2D-V1 (image-only, reward on task events,
+  no goal coords) — search/wandering for trash, fixture locations learned in
+  weights. The goal-conditioned net survives as the "go to pose" skill for a
+  future hierarchical stack.

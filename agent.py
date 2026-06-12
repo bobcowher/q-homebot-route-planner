@@ -62,16 +62,17 @@ class Agent:
         obs = torch.from_numpy(obs).permute(2, 0, 1)
         return obs
 
-    def select_action(self, obs, goal):
+    def select_action(self, obs, rel_goal):
+        """rel_goal: desired_goal - current robot position (map pixels)."""
         if random.random() < self.epsilon:
             return self.env.action_space.sample()
         with torch.no_grad():
             obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
-            goal_t = torch.as_tensor(goal, dtype=torch.float32, device=self.device).unsqueeze(0)
+            goal_t = torch.as_tensor(rel_goal, dtype=torch.float32, device=self.device).unsqueeze(0)
             return self.q_model(obs_t, goal_t).argmax(dim=1).item()
 
     def train_step(self, batch_size):
-        obs, actions, rewards, next_obs, dones, goals = self.memory.sample_buffer(batch_size)
+        obs, actions, rewards, next_obs, dones, goals, next_goals = self.memory.sample_buffer(batch_size)
 
         obs      = obs      / 255.0
         next_obs = next_obs / 255.0
@@ -83,8 +84,8 @@ class Agent:
         q_sa = self.q_model(obs, goals).gather(1, actions)
 
         with torch.no_grad():
-            next_actions = self.q_model(next_obs, goals).argmax(dim=1, keepdim=True)
-            next_q       = self.target_q_model(next_obs, goals).gather(1, next_actions)
+            next_actions = self.q_model(next_obs, next_goals).argmax(dim=1, keepdim=True)
+            next_q       = self.target_q_model(next_obs, next_goals).gather(1, next_actions)
             targets      = rewards + (1 - dones) * self.gamma * next_q
 
         loss = F.smooth_l1_loss(q_sa, targets)
@@ -131,6 +132,7 @@ class Agent:
             raw_obs, _ = self.env.reset()
             obs          = self.process_observation(raw_obs["observation"])
             desired_goal = raw_obs["desired_goal"]
+            pos          = raw_obs["achieved_goal"]
 
             done = False
             episode_reward = 0.0
@@ -138,9 +140,10 @@ class Agent:
             episode_steps  = 0
 
             while not done:
-                action = self.select_action(obs, desired_goal)
+                action = self.select_action(obs, desired_goal - pos)
                 raw_next, reward, term, trunc, _ = self.env.step(action)
                 next_obs = self.process_observation(raw_next["observation"])
+                next_pos = raw_next["achieved_goal"]
                 done = term or trunc
 
                 # Store term (not trunc): a timeout is not a terminal state, so the
@@ -148,11 +151,13 @@ class Agent:
                 # trains Q toward 0 at far-from-goal states.
                 self.episode_buffer.store(
                     obs, action, reward, next_obs, term,
-                    achieved_goal=raw_next["achieved_goal"],
+                    achieved_prev=pos,
+                    achieved_next=next_pos,
                 )
                 episode_reward += float(reward)
                 episode_steps  += 1
                 obs = next_obs
+                pos = next_pos
 
             self.episode_buffer.send_to(
                 self.memory,
@@ -187,13 +192,14 @@ class Agent:
             raw_obs, _ = self.env.reset()
             obs          = self.process_observation(raw_obs["observation"])
             desired_goal = raw_obs["desired_goal"]
+            pos          = raw_obs["achieved_goal"]
             done = False
             episode_reward = 0.0
 
             while not done:
                 with torch.no_grad():
                     obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
-                    goal_t = torch.as_tensor(desired_goal, dtype=torch.float32,
+                    goal_t = torch.as_tensor(desired_goal - pos, dtype=torch.float32,
                                              device=self.device).unsqueeze(0)
                     action = self.q_model(obs_t, goal_t).argmax(dim=1).item()
                 raw_next, reward, term, trunc, _ = self.env.step(action)
@@ -201,6 +207,7 @@ class Agent:
                 done = term or trunc
                 episode_reward += float(reward)
                 obs = next_obs
+                pos = raw_next["achieved_goal"]
 
             total_rewards.append(episode_reward)
             print(f"Test episode {episode} | reward: {episode_reward:.1f}")
