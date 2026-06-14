@@ -1,5 +1,4 @@
 import os
-import math
 import subprocess
 import gymnasium as gym
 import numpy as np
@@ -72,20 +71,6 @@ class Agent:
         obs = torch.from_numpy(obs).permute(2, 0, 1)
         return obs
 
-    def _random_spawn(self):
-        """Rung 1 variable: teleport the robot to a random valid floor tile and
-        random heading, then refetch a fresh obs dict (the post-reset obs still
-        shows the old pose). Goal (trash) is unchanged — only the start moves.
-        """
-        base = self.env.unwrapped
-        tiles = base._map.valid_floor_tiles()
-        tx, ty = random.choice(tiles)
-        px, py = base._map.tile_to_pixel(tx, ty)
-        base._robot.x = px
-        base._robot.y = py
-        base._robot.angle = random.uniform(-math.pi, math.pi)
-        return base._build_obs()
-
     def select_action(self, obs, rel_goal):
         """rel_goal: desired_goal - current robot position (map pixels)."""
         if random.random() < self.epsilon:
@@ -154,10 +139,9 @@ class Agent:
         success_steps = []
 
         for _ in range(n_episodes):
-            self.env.reset()
-            fresh        = self._random_spawn()
-            obs          = self.process_observation(fresh["observation"])
-            desired_goal = fresh["desired_goal"]
+            raw_obs, _   = self.env.reset()
+            obs          = self.process_observation(raw_obs["observation"])
+            desired_goal = raw_obs["desired_goal"]
             base         = self.env.unwrapped
             r            = base._robot
 
@@ -211,10 +195,9 @@ class Agent:
         writer = SummaryWriter(f'runs/{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_{run_tag}')
 
         for episode in range(episodes):
-            self.env.reset()
-            fresh        = self._random_spawn()
-            obs          = self.process_observation(fresh["observation"])
-            desired_goal = fresh["desired_goal"]
+            raw_obs, _   = self.env.reset()
+            obs          = self.process_observation(raw_obs["observation"])
+            desired_goal = raw_obs["desired_goal"]
             base         = self.env.unwrapped
             r            = base._robot
 

@@ -11,8 +11,9 @@ env = gym.make(
     max_steps=1000,
     map_name="default",
     goals=["collect_trash"],
+    random_start=True,   # env owns spawn now (uniform valid tile, >=60px from goals)
 )
 
 agent = Agent(env=env, max_buffer_size=200000)
 
-agent.train(episodes=2500, batch_size=64, eval_interval=50, eval_episodes=20)
+agent.train(episodes=1200, batch_size=64, eval_interval=50, eval_episodes=20)
