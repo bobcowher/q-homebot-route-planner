@@ -2,6 +2,7 @@ import os
 import math
 import subprocess
 import gymnasium as gym
+import numpy as np
 import torch
 import torch.nn.functional as F
 import random
@@ -9,6 +10,7 @@ import cv2
 import datetime
 from buffer import ReplayBuffer
 from episode_buffer import EpisodeBuffer
+from goal_geometry import ego_vector
 from models.q_model import QModel
 from torch.utils.tensorboard.writer import SummaryWriter
 
@@ -151,21 +153,23 @@ class Agent:
             fresh        = self._random_spawn()
             obs          = self.process_observation(fresh["observation"])
             desired_goal = fresh["desired_goal"]
-            pos          = fresh["achieved_goal"]
+            base         = self.env.unwrapped
+            r            = base._robot
 
             done = False
             ep_reward = 0.0
             steps = 0
             while not done:
+                goal_ego = ego_vector(r.x, r.y, r.angle,
+                                      desired_goal[0], desired_goal[1])
                 with torch.no_grad():
                     obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
-                    goal_t = torch.as_tensor(desired_goal - pos, dtype=torch.float32,
+                    goal_t = torch.as_tensor(goal_ego, dtype=torch.float32,
                                              device=self.device).unsqueeze(0)
                     action = self.q_model(obs_t, goal_t).argmax(dim=1).item()
 
                 raw_next, reward, term, trunc, _ = self.env.step(action)
                 obs = self.process_observation(raw_next["observation"])
-                pos = raw_next["achieved_goal"]
                 ep_reward += float(reward)
                 steps += 1
                 done = term or trunc
@@ -206,7 +210,8 @@ class Agent:
             fresh        = self._random_spawn()
             obs          = self.process_observation(fresh["observation"])
             desired_goal = fresh["desired_goal"]
-            pos          = fresh["achieved_goal"]
+            base         = self.env.unwrapped
+            r            = base._robot
 
             done = False
             episode_reward = 0.0
@@ -214,10 +219,16 @@ class Agent:
             episode_steps  = 0
 
             while not done:
-                action = self.select_action(obs, desired_goal - pos)
+                heading_prev = r.angle
+                pos_prev     = np.array([r.x, r.y], dtype=np.float32)
+                goal_ego     = ego_vector(r.x, r.y, r.angle,
+                                          desired_goal[0], desired_goal[1])
+                action       = self.select_action(obs, goal_ego)
+
                 raw_next, reward, term, trunc, _ = self.env.step(action)
-                next_obs = self.process_observation(raw_next["observation"])
-                next_pos = raw_next["achieved_goal"]
+                next_obs     = self.process_observation(raw_next["observation"])
+                heading_next = r.angle
+                pos_next     = np.array([r.x, r.y], dtype=np.float32)
                 done = term or trunc
 
                 # Store term (not trunc): a timeout is not a terminal state, so the
@@ -225,13 +236,14 @@ class Agent:
                 # trains Q toward 0 at far-from-goal states.
                 self.episode_buffer.store(
                     obs, action, reward, next_obs, term,
-                    achieved_prev=pos,
-                    achieved_next=next_pos,
+                    achieved_prev=pos_prev,
+                    achieved_next=pos_next,
+                    heading_prev=heading_prev,
+                    heading_next=heading_next,
                 )
                 episode_reward += float(reward)
                 episode_steps  += 1
                 obs = next_obs
-                pos = next_pos
 
             self.episode_buffer.send_to(
                 self.memory,
