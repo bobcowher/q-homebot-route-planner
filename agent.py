@@ -57,8 +57,13 @@ class Agent:
         self.epsilon_decay = 0.977
 
         self.target_update_interval = target_update_interval
-        self.total_steps = 0
+        self.total_steps = 0          # grad-step counter
+        self.total_env_steps = 0      # env-step counter (for UTD visibility)
         self.episode_buffer = EpisodeBuffer()
+
+        # UTD: gradient updates per ENV step (replaces the old fixed 800-per-
+        # episode block, which silently raised UTD as episodes shortened).
+        self.updates_per_step = 1
 
         self.best_reach_rate = -1.0
 
@@ -243,7 +248,14 @@ class Agent:
                 )
                 episode_reward += float(reward)
                 episode_steps  += 1
+                self.total_env_steps += 1
                 obs = next_obs
+
+                # UTD: fixed gradient updates per ENV step (not per episode), so
+                # the update-to-data ratio stays constant as episodes shorten.
+                for _ in range(self.updates_per_step):
+                    if self.memory.can_sample(batch_size):
+                        episode_loss += self.train_step(batch_size)
 
             self.episode_buffer.send_to(
                 self.memory,
@@ -251,10 +263,6 @@ class Agent:
                 compute_reward=self.env.unwrapped.compute_reward,  # type: ignore[attr-defined]
             )
             self.episode_buffer.clear()
-
-            for _ in range(800):
-                if self.memory.can_sample(batch_size):
-                    episode_loss += self.train_step(batch_size)
 
             self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
 
@@ -265,6 +273,9 @@ class Agent:
             writer.add_scalar("Train/epsilon",         self.epsilon,   episode)
             writer.add_scalar("Train/avg_q_loss",      avg_loss,       episode)
             writer.add_scalar("Train/episode_steps",   episode_steps,  episode)
+            writer.add_scalar("Train/total_grad_steps", self.total_steps,     episode)
+            writer.add_scalar("Train/total_env_steps",  self.total_env_steps, episode)
+            writer.add_scalar("Train/updates_per_env_step", self.updates_per_step, episode)
             writer.add_scalar("Buffer/fill", min(self.memory.mem_ctr, self.memory.mem_size), episode)
 
             if episode % 10 == 0:
