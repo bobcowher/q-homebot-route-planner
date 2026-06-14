@@ -8,6 +8,7 @@ import cv2
 import datetime
 from buffer import ReplayBuffer
 from episode_buffer import EpisodeBuffer
+from goal_geometry import distance, eval_step_budget, GOAL_RADIUS
 from models.q_model import QModel
 from torch.utils.tensorboard.writer import SummaryWriter
 
@@ -56,6 +57,8 @@ class Agent:
         self.target_update_interval = target_update_interval
         self.total_steps = 0
         self.episode_buffer = EpisodeBuffer()
+
+        self.best_reach_rate = -1.0
 
     def process_observation(self, obs):
         obs = cv2.resize(obs, (96, 96), interpolation=cv2.INTER_NEAREST)
@@ -108,7 +111,62 @@ class Agent:
         self.q_model.load_the_model("q_model", device=self.device)
         self.target_q_model.load_state_dict(self.q_model.state_dict())
 
-    def train(self, episodes=1000, batch_size=64, run_tag=None):
+    def save_best(self, episode, reach_rate):
+        path = "checkpoints/q_model_best.pt"
+        torch.save({
+            "q_model": self.q_model.state_dict(),
+            "episode": episode,
+            "reach_rate": reach_rate,
+        }, path)
+        print(f"  New best checkpoint saved (episode={episode}, reach_rate={reach_rate:.3f})")
+
+    def greedy_eval(self, n_episodes: int = 20) -> float:
+        """Honest greedy eval — identical regime to `her` training (env-default
+        spawn, displacement goal), but deterministic (argmax, no epsilon) and
+        budget-limited so a circling policy can't sweep-and-pass.
+
+        Per episode: env.reset() -> step budget from initial distance -> run
+        greedy for at most budget steps -> success if the robot comes within
+        GOAL_RADIUS of desired_goal (the env's own trash pickup distance).
+        """
+        self.q_model.eval()
+        successes = 0
+
+        for _ in range(n_episodes):
+            raw_obs, _ = self.env.reset()
+            obs          = self.process_observation(raw_obs["observation"])
+            desired_goal = raw_obs["desired_goal"]
+            pos          = raw_obs["achieved_goal"]
+
+            init_dist = distance(pos[0], pos[1], desired_goal[0], desired_goal[1])
+            budget    = eval_step_budget(init_dist)
+
+            reached = False
+            for _ in range(budget):
+                with torch.no_grad():
+                    obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
+                    goal_t = torch.as_tensor(desired_goal - pos, dtype=torch.float32,
+                                             device=self.device).unsqueeze(0)
+                    action = self.q_model(obs_t, goal_t).argmax(dim=1).item()
+
+                raw_next, _, term, trunc, _ = self.env.step(action)
+                obs = self.process_observation(raw_next["observation"])
+                pos = raw_next["achieved_goal"]
+
+                if distance(pos[0], pos[1], desired_goal[0], desired_goal[1]) < GOAL_RADIUS:
+                    reached = True
+                    break
+                if term or trunc:
+                    break
+
+            if reached:
+                successes += 1
+
+        self.q_model.train()
+        return successes / n_episodes
+
+    def train(self, episodes=1000, batch_size=64, run_tag=None,
+              eval_interval=50, eval_episodes=20):
         if run_tag is None:
             try:
                 refs = subprocess.check_output(
@@ -183,6 +241,15 @@ class Agent:
 
             if episode % 10 == 0:
                 self.save()
+
+            # Honest greedy eval — the real metric for the ablation ladder.
+            if episode % eval_interval == 0:
+                reach_rate = self.greedy_eval(n_episodes=eval_episodes)
+                writer.add_scalar("Eval/greedy_reach_rate", reach_rate, episode)
+                print(f"  [Eval] episode {episode}: greedy reach_rate={reach_rate:.3f}")
+                if reach_rate > self.best_reach_rate:
+                    self.best_reach_rate = reach_rate
+                    self.save_best(episode, reach_rate)
 
     def test(self, episodes=10):
         self.q_model.eval()

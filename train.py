@@ -15,4 +15,4 @@ env = gym.make(
 
 agent = Agent(env=env, max_buffer_size=200000)
 
-agent.train(episodes=2500, batch_size=64)
+agent.train(episodes=2500, batch_size=64, eval_interval=50, eval_episodes=20)
