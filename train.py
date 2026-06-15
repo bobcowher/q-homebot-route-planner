@@ -14,6 +14,8 @@ env = gym.make(
     random_start=True,   # env owns spawn now (uniform valid tile, >=60px from goals)
 )
 
-agent = Agent(env=env, max_buffer_size=200000)
+# Deep variant: 2-layer goal encoder + 2-layer head. Tests whether depth helps
+# the more compositional coordinate goal rep (net must learn robot/goal relation).
+agent = Agent(env=env, max_buffer_size=200000, goal_layers=2, head_layers=2)
 
 agent.train(episodes=1200, batch_size=64, eval_interval=50, eval_episodes=20)
