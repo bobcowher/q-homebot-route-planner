@@ -173,6 +173,50 @@ class Agent:
         )
         return successes / n_episodes
 
+    def softmax_eval(self, n_episodes: int = 20, temp: float = 0.1):
+        """Same as greedy_eval but samples a ~ softmax(Q(s,.)/temp) instead of
+        argmax. Tests whether stochastic action selection breaks the limit cycles
+        that pin greedy reach far below training reward (the 0.9-train/0.25-greedy
+        gap). Returns (reach_rate, avg_success_steps)."""
+        self.q_model.eval()
+        successes = 0
+        success_steps = []
+
+        for _ in range(n_episodes):
+            raw_obs, _   = self.env.reset()
+            obs          = self.process_observation(raw_obs["observation"])
+            desired_goal = raw_obs["desired_goal"]
+            base         = self.env.unwrapped
+            r            = base._robot
+
+            done = False
+            ep_reward = 0.0
+            steps = 0
+            while not done:
+                goal_vec = world_vector(r.x, r.y,
+                                        desired_goal[0], desired_goal[1])
+                with torch.no_grad():
+                    obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
+                    goal_t = torch.as_tensor(goal_vec, dtype=torch.float32,
+                                             device=self.device).unsqueeze(0)
+                    q      = self.q_model(obs_t, goal_t).squeeze(0)
+                    probs  = F.softmax(q / temp, dim=0)
+                    action = int(torch.multinomial(probs, 1).item())
+
+                raw_next, reward, term, trunc, _ = self.env.step(action)
+                obs = self.process_observation(raw_next["observation"])
+                ep_reward += float(reward)
+                steps += 1
+                done = term or trunc
+
+            if ep_reward > 0.5:
+                successes += 1
+                success_steps.append(steps)
+
+        self.q_model.train()
+        avg_steps = sum(success_steps) / len(success_steps) if success_steps else 0.0
+        return successes / n_episodes, avg_steps
+
     def train(self, episodes=1000, batch_size=64, run_tag=None,
               eval_interval=50, eval_episodes=20):
         if run_tag is None:
@@ -272,6 +316,16 @@ class Agent:
                                   getattr(self, "last_avg_success_steps", 0.0), episode)
                 print(f"  [Eval] episode {episode}: greedy reach_rate={reach_rate:.3f} "
                       f"| avg_success_steps={getattr(self, 'last_avg_success_steps', 0.0):.0f}")
+
+                # Softmax (Boltzmann) eval readout: does sampling break the greedy
+                # limit cycles and close the train/greedy gap? Sweep two temps.
+                for temp in (0.05, 0.15):
+                    sm_reach, sm_steps = self.softmax_eval(n_episodes=eval_episodes, temp=temp)
+                    writer.add_scalar(f"Eval/softmax_reach_rate_t{temp}", sm_reach, episode)
+                    writer.add_scalar(f"Eval/softmax_avg_success_steps_t{temp}", sm_steps, episode)
+                    print(f"  [Eval] episode {episode}: softmax(t={temp}) "
+                          f"reach_rate={sm_reach:.3f} | avg_success_steps={sm_steps:.0f}")
+
                 if reach_rate > self.best_reach_rate:
                     self.best_reach_rate = reach_rate
                     self.save_best(episode, reach_rate)
