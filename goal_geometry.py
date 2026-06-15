@@ -34,6 +34,18 @@ def ego_vector(rx: float, ry: float, rtheta: float, gx: float, gy: float) -> np.
     return np.array([x_ego, y_ego], dtype=np.float32)
 
 
+def world_vector(rx: float, ry: float, gx: float, gy: float) -> np.ndarray:
+    """Goal displacement in the WORLD frame (no heading rotation).
+
+    The discrete action space is 8 fixed compass directions (world-frame), and the
+    observation viewport is north-up (world-frame). ego_vector rotated the goal by
+    -heading into a frame matching neither — and heading isn't even an input — so
+    the net got a goal direction scrambled by an unobservable rotation. Returning
+    the raw world displacement puts goal, image, and actions all in one frame.
+    """
+    return np.array([gx - rx, gy - ry], dtype=np.float32)
+
+
 def eval_step_budget(init_dist: float) -> int:
     """Step budget for greedy eval.
 

@@ -9,7 +9,7 @@ import cv2
 import datetime
 from buffer import ReplayBuffer
 from episode_buffer import EpisodeBuffer
-from goal_geometry import ego_vector
+from goal_geometry import world_vector
 from models.q_model import QModel
 from torch.utils.tensorboard.writer import SummaryWriter
 
@@ -149,11 +149,11 @@ class Agent:
             ep_reward = 0.0
             steps = 0
             while not done:
-                goal_ego = ego_vector(r.x, r.y, r.angle,
-                                      desired_goal[0], desired_goal[1])
+                goal_vec = world_vector(r.x, r.y,
+                                        desired_goal[0], desired_goal[1])
                 with torch.no_grad():
                     obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
-                    goal_t = torch.as_tensor(goal_ego, dtype=torch.float32,
+                    goal_t = torch.as_tensor(goal_vec, dtype=torch.float32,
                                              device=self.device).unsqueeze(0)
                     action = self.q_model(obs_t, goal_t).argmax(dim=1).item()
 
@@ -209,9 +209,9 @@ class Agent:
             while not done:
                 heading_prev = r.angle
                 pos_prev     = np.array([r.x, r.y], dtype=np.float32)
-                goal_ego     = ego_vector(r.x, r.y, r.angle,
-                                          desired_goal[0], desired_goal[1])
-                action       = self.select_action(obs, goal_ego)
+                goal_vec     = world_vector(r.x, r.y,
+                                            desired_goal[0], desired_goal[1])
+                action       = self.select_action(obs, goal_vec)
 
                 raw_next, reward, term, trunc, _ = self.env.step(action)
                 next_obs     = self.process_observation(raw_next["observation"])
