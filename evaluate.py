@@ -18,6 +18,7 @@ import gymnasium as gym
 import torch
 
 import homebot  # noqa: F401  (side-effect env registration)
+from goal_geometry import world_coords
 from models.q_model import QModel
 
 
@@ -31,16 +32,18 @@ def make_env():
         max_steps=1000,
         map_name="default",
         goals=["collect_trash"],
+        random_start=True,   # match train.py spawn
     )
     return env
 
 
-def load_q_model(path, n_actions, device):
+def load_q_model(path, n_actions, device, goal_layers=1, head_layers=1):
     state = torch.load(path, map_location=device)
     if "q_model" in state:  # best.pt wraps the state_dict with metadata
         print(f"  ({path} is a best-checkpoint from episode {state.get('episode')})")
         state = state["q_model"]
-    model = QModel(action_dim=n_actions).to(device)
+    model = QModel(action_dim=n_actions, goal_layers=goal_layers,
+                   head_layers=head_layers).to(device)
     model.load_state_dict(state)
     model.eval()
     return model
@@ -71,9 +74,11 @@ def evaluate(model, env, episodes, device, epsilon=0.0):
             else:
                 with torch.no_grad():
                     obs_t = obs.unsqueeze(0).float().to(device) / 255.0
-                    # Relative goal changes every step as the robot moves.
+                    # Coord rep: [robot_x, robot_y, goal_x, goal_y], pose updates each step.
+                    goal_vec = world_coords(pos[0], pos[1],
+                                            desired_goal[0], desired_goal[1])
                     goal_t = torch.as_tensor(
-                        desired_goal - pos, dtype=torch.float32, device=device
+                        goal_vec, dtype=torch.float32, device=device
                     ).unsqueeze(0)
                     action = model(obs_t, goal_t).argmax(dim=1).item()
             raw_next, reward, term, trunc, _ = env.step(action)

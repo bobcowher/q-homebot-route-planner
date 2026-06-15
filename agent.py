@@ -9,7 +9,7 @@ import cv2
 import datetime
 from buffer import ReplayBuffer
 from episode_buffer import EpisodeBuffer
-from goal_geometry import world_vector
+from goal_geometry import world_coords
 from models.q_model import QModel
 from torch.utils.tensorboard.writer import SummaryWriter
 
@@ -18,7 +18,9 @@ class Agent:
 
     def __init__(self, env: gym.Env,
                        max_buffer_size: int = 100000,
-                       target_update_interval: int = 1000) -> None:
+                       target_update_interval: int = 1000,
+                       goal_layers: int = 1,
+                       head_layers: int = 1) -> None:
         self.env = env
         self.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
@@ -30,21 +32,31 @@ class Agent:
 
         self.n_actions = self.env.action_space.n  # type: ignore[union-attr]
 
+        # Coordinate reframing: goal is [robot_x, robot_y, goal_x, goal_y].
+        self.goal_dim = 4
+
         self.memory = ReplayBuffer(
             max_size=max_buffer_size,
             input_shape=obs.shape,
             input_device=self.device,
             output_device=self.device,
+            goal_dim=self.goal_dim,
         )
 
         self.q_model = QModel(
             action_dim=self.n_actions,
             input_shape=obs.shape,
+            goal_dim=self.goal_dim,
+            goal_layers=goal_layers,
+            head_layers=head_layers,
         ).to(self.device)
 
         self.target_q_model = QModel(
             action_dim=self.n_actions,
             input_shape=obs.shape,
+            goal_dim=self.goal_dim,
+            goal_layers=goal_layers,
+            head_layers=head_layers,
         ).to(self.device)
         self.target_q_model.load_state_dict(self.q_model.state_dict())
 
@@ -71,13 +83,13 @@ class Agent:
         obs = torch.from_numpy(obs).permute(2, 0, 1)
         return obs
 
-    def select_action(self, obs, rel_goal):
-        """rel_goal: desired_goal - current robot position (map pixels)."""
+    def select_action(self, obs, goal):
+        """goal: absolute coords [robot_x, robot_y, goal_x, goal_y] (map pixels)."""
         if random.random() < self.epsilon:
             return self.env.action_space.sample()
         with torch.no_grad():
             obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
-            goal_t = torch.as_tensor(rel_goal, dtype=torch.float32, device=self.device).unsqueeze(0)
+            goal_t = torch.as_tensor(goal, dtype=torch.float32, device=self.device).unsqueeze(0)
             return self.q_model(obs_t, goal_t).argmax(dim=1).item()
 
     def train_step(self, batch_size):
@@ -149,7 +161,7 @@ class Agent:
             ep_reward = 0.0
             steps = 0
             while not done:
-                goal_vec = world_vector(r.x, r.y,
+                goal_vec = world_coords(r.x, r.y,
                                         desired_goal[0], desired_goal[1])
                 with torch.no_grad():
                     obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
@@ -193,7 +205,7 @@ class Agent:
             ep_reward = 0.0
             steps = 0
             while not done:
-                goal_vec = world_vector(r.x, r.y,
+                goal_vec = world_coords(r.x, r.y,
                                         desired_goal[0], desired_goal[1])
                 with torch.no_grad():
                     obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
@@ -253,7 +265,7 @@ class Agent:
             while not done:
                 heading_prev = r.angle
                 pos_prev     = np.array([r.x, r.y], dtype=np.float32)
-                goal_vec     = world_vector(r.x, r.y,
+                goal_vec     = world_coords(r.x, r.y,
                                             desired_goal[0], desired_goal[1])
                 action       = self.select_action(obs, goal_vec)
 
@@ -345,7 +357,9 @@ class Agent:
             while not done:
                 with torch.no_grad():
                     obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
-                    goal_t = torch.as_tensor(desired_goal - pos, dtype=torch.float32,
+                    goal_vec = world_coords(pos[0], pos[1],
+                                            desired_goal[0], desired_goal[1])
+                    goal_t = torch.as_tensor(goal_vec, dtype=torch.float32,
                                              device=self.device).unsqueeze(0)
                     action = self.q_model(obs_t, goal_t).argmax(dim=1).item()
                 raw_next, reward, term, trunc, _ = self.env.step(action)

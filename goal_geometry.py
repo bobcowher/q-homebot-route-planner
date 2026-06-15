@@ -46,6 +46,22 @@ def world_vector(rx: float, ry: float, gx: float, gy: float) -> np.ndarray:
     return np.array([gx - rx, gy - ry], dtype=np.float32)
 
 
+def world_coords(rx: float, ry: float, gx: float, gy: float) -> np.ndarray:
+    """Goal as raw ABSOLUTE coordinates: [robot_x, robot_y, goal_x, goal_y].
+
+    Coordinate reframing (vs world_vector). Instead of handing the network the
+    pre-computed displacement (gx-rx, gy-ry), feed both the robot's absolute pose
+    and the goal's absolute position and let the net learn the relationship. The
+    egocentric viewport hides absolute robot position from the image, so the pose
+    must come in through this vector or the net can't localize itself. A real
+    robot knows its own pose (odometry/localization) and the goal coordinate, so
+    this stays within the env-realism rule. More compositional than world_vector
+    (the net computes the subtraction + direction), which is why it's the natural
+    place to test head depth.
+    """
+    return np.array([rx, ry, gx, gy], dtype=np.float32)
+
+
 def eval_step_budget(init_dist: float) -> int:
     """Step budget for greedy eval.
 

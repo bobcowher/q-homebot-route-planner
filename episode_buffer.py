@@ -4,7 +4,7 @@ import random
 import numpy as np
 import torch
 
-from goal_geometry import world_vector
+from goal_geometry import world_coords
 
 
 @dataclass
@@ -23,11 +23,11 @@ class Transition:
 class EpisodeBuffer:
     """Caches one episode's transitions for HER relabeling.
 
-    Rung 2: the network consumes the goal in the robot's EGOCENTRIC frame
-    (displacement rotated by -heading, magnitude preserved). The relative goal
-    changes within a transition as the robot moves AND turns, so each transition
-    stores robot position and heading at both s and s'. Rewards still computed
-    from absolute positions.
+    Coordinate reframing: the network consumes the goal as absolute coords
+    [robot_x, robot_y, goal_x, goal_y]. The robot-pose half changes within a
+    transition as the robot moves, so each transition stores robot position at
+    both s and s' (heading retained for compatibility but unused by the coord
+    rep). Rewards still computed from absolute positions.
     """
 
     K = 2  # hindsight goals per transition (future strategy)
@@ -64,17 +64,17 @@ class EpisodeBuffer:
     ) -> None:
         """Write original transitions then K hindsight-relabeled copies.
 
-        Strategy: future. Goals stored as WORLD-frame displacement vectors
-        (raw goal - pose, no heading rotation) to match the world-frame action
-        space and viewport.
+        Strategy: future. Goals stored as absolute coords
+        [robot_x, robot_y, goal_x, goal_y]; the robot-pose half is the pose at
+        that transition, the goal half is the (desired or hindsight) target.
         """
         dg = desired_goal  # absolute map-px (x, y)
 
         # Pass 1: original transitions (env reward, episode desired_goal)
         for t in self._transitions:
-            goal_at_s  = world_vector(t.achieved_prev[0], t.achieved_prev[1],
+            goal_at_s  = world_coords(t.achieved_prev[0], t.achieved_prev[1],
                                       dg[0], dg[1])
-            goal_at_sp = world_vector(t.achieved_next[0], t.achieved_next[1],
+            goal_at_sp = world_coords(t.achieved_next[0], t.achieved_next[1],
                                       dg[0], dg[1])
             replay_buffer.store_transition(
                 t.obs, t.action, t.reward, t.next_obs, t.done,
@@ -98,9 +98,9 @@ class EpisodeBuffer:
                 # relabeled success must be terminal too — otherwise targets bootstrap
                 # past the goal and inflate Q toward 1/(1-gamma) in hindsight data.
                 hindsight_done = hindsight_reward > 0.5
-                hs_goal_at_s  = world_vector(t.achieved_prev[0], t.achieved_prev[1],
+                hs_goal_at_s  = world_coords(t.achieved_prev[0], t.achieved_prev[1],
                                              hindsight_goal[0], hindsight_goal[1])
-                hs_goal_at_sp = world_vector(t.achieved_next[0], t.achieved_next[1],
+                hs_goal_at_sp = world_coords(t.achieved_next[0], t.achieved_next[1],
                                              hindsight_goal[0], hindsight_goal[1])
                 replay_buffer.store_transition(
                     t.obs, t.action, hindsight_reward, t.next_obs, hindsight_done,
