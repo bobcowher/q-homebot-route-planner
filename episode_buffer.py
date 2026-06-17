@@ -18,6 +18,8 @@ class Transition:
     achieved_next: np.ndarray  # robot pixel (x, y) at next_obs (after the step)
     heading_prev:  float       # robot.angle (radians) before the step
     heading_next:  float       # robot.angle (radians) after the step
+    motion_prev:   np.ndarray | None = None  # motion feature at s  (state-intrinsic)
+    motion_next:   np.ndarray | None = None  # motion feature at s' (state-intrinsic)
 
 
 class EpisodeBuffer:
@@ -37,7 +39,8 @@ class EpisodeBuffer:
 
     def store(self, obs, action, reward, next_obs, done,
               achieved_prev, achieved_next,
-              heading_prev: float = 0.0, heading_next: float = 0.0):
+              heading_prev: float = 0.0, heading_next: float = 0.0,
+              motion_prev=None, motion_next=None):
         self._transitions.append(Transition(
             obs=obs,
             action=action,
@@ -48,6 +51,8 @@ class EpisodeBuffer:
             achieved_next=achieved_next,
             heading_prev=float(heading_prev),
             heading_next=float(heading_next),
+            motion_prev=motion_prev,
+            motion_next=motion_next,
         ))
 
     def __len__(self):
@@ -79,6 +84,7 @@ class EpisodeBuffer:
             replay_buffer.store_transition(
                 t.obs, t.action, t.reward, t.next_obs, t.done,
                 goal_at_s, goal_at_sp,
+                motion=t.motion_prev, next_motion=t.motion_next,
             )
 
         # Pass 2: hindsight transitions
@@ -105,4 +111,5 @@ class EpisodeBuffer:
                 replay_buffer.store_transition(
                     t.obs, t.action, hindsight_reward, t.next_obs, hindsight_done,
                     hs_goal_at_s, hs_goal_at_sp,
+                    motion=t.motion_prev, next_motion=t.motion_next,
                 )

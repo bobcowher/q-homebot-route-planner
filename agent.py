@@ -10,6 +10,7 @@ import datetime
 from buffer import ReplayBuffer
 from episode_buffer import EpisodeBuffer
 from goal_geometry import world_coords
+from motion import MotionState, make_motion, motion_dim
 from models.q_model import QModel
 from task_chain import DEFAULT_CHAIN
 from chained_eval import run_chain
@@ -24,6 +25,7 @@ class Agent:
                        goal_layers: int = 1,
                        head_layers: int = 1,
                        head_norm: bool = False,
+                       use_motion: bool = False,
                        random_goal_tiles: bool = False) -> None:
         self.env = env
         # When True, each episode's goal is a uniformly-sampled valid floor tile
@@ -43,12 +45,18 @@ class Agent:
         # Coordinate reframing: goal is [robot_x, robot_y, goal_x, goal_y].
         self.goal_dim = 4
 
+        # Previous-motion input (anti-oscillation): last action + velocity, so the
+        # net can tell "approaching" from "stuck/reversing" (position alone can't).
+        self.use_motion = use_motion
+        self.motion_dim = motion_dim(self.n_actions) if use_motion else 0
+
         self.memory = ReplayBuffer(
             max_size=max_buffer_size,
             input_shape=obs.shape,
             input_device=self.device,
             output_device=self.device,
             goal_dim=self.goal_dim,
+            motion_dim=self.motion_dim,
         )
 
         self.q_model = QModel(
@@ -58,6 +66,8 @@ class Agent:
             goal_layers=goal_layers,
             head_layers=head_layers,
             head_norm=head_norm,
+            use_motion=use_motion,
+            motion_in_dim=self.motion_dim or None,
         ).to(self.device)
 
         self.target_q_model = QModel(
@@ -67,6 +77,8 @@ class Agent:
             goal_layers=goal_layers,
             head_layers=head_layers,
             head_norm=head_norm,
+            use_motion=use_motion,
+            motion_in_dim=self.motion_dim or None,
         ).to(self.device)
         self.target_q_model.load_state_dict(self.q_model.state_dict())
 
@@ -115,17 +127,26 @@ class Agent:
         base._desired_goal = goal
         return goal
 
-    def select_action(self, obs, goal):
-        """goal: absolute coords [robot_x, robot_y, goal_x, goal_y] (map pixels)."""
+    def _q_forward(self, model, obs, goal, motion):
+        """Single-sample greedy forward; builds the motion tensor when enabled."""
+        obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
+        goal_t = torch.as_tensor(goal, dtype=torch.float32, device=self.device).unsqueeze(0)
+        motion_t = None
+        if self.use_motion:
+            motion_t = torch.as_tensor(motion, dtype=torch.float32, device=self.device).unsqueeze(0)
+        return model(obs_t, goal_t, motion_t)
+
+    def select_action(self, obs, goal, motion=None):
+        """goal: absolute coords [robot_x, robot_y, goal_x, goal_y] (map pixels).
+        motion: previous-motion feature (used only when use_motion)."""
         if random.random() < self.epsilon:
             return self.env.action_space.sample()
         with torch.no_grad():
-            obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
-            goal_t = torch.as_tensor(goal, dtype=torch.float32, device=self.device).unsqueeze(0)
-            return self.q_model(obs_t, goal_t).argmax(dim=1).item()
+            return self._q_forward(self.q_model, obs, goal, motion).argmax(dim=1).item()
 
     def train_step(self, batch_size):
-        obs, actions, rewards, next_obs, dones, goals, next_goals = self.memory.sample_buffer(batch_size)
+        (obs, actions, rewards, next_obs, dones, goals, next_goals,
+         motions, next_motions) = self.memory.sample_buffer(batch_size)
 
         obs      = obs      / 255.0
         next_obs = next_obs / 255.0
@@ -134,11 +155,11 @@ class Agent:
         rewards = rewards.unsqueeze(1)
         dones   = dones.unsqueeze(1).float()
 
-        q_sa = self.q_model(obs, goals).gather(1, actions)
+        q_sa = self.q_model(obs, goals, motions).gather(1, actions)
 
         with torch.no_grad():
-            next_actions = self.q_model(next_obs, next_goals).argmax(dim=1, keepdim=True)
-            next_q       = self.target_q_model(next_obs, next_goals).gather(1, next_actions)
+            next_actions = self.q_model(next_obs, next_goals, next_motions).argmax(dim=1, keepdim=True)
+            next_q       = self.target_q_model(next_obs, next_goals, next_motions).gather(1, next_actions)
             targets      = rewards + (1 - dones) * self.gamma * next_q
 
         loss = F.smooth_l1_loss(q_sa, targets)
@@ -189,6 +210,7 @@ class Agent:
             base         = self.env.unwrapped
             r            = base._robot
             desired_goal = self._reset_goal(base, desired_goal)
+            ms           = MotionState(self.n_actions)
 
             done = False
             ep_reward = 0.0
@@ -196,11 +218,10 @@ class Agent:
             while not done:
                 goal_vec = world_coords(r.x, r.y,
                                         desired_goal[0], desired_goal[1])
+                motion = ms.vec(r.x, r.y)
                 with torch.no_grad():
-                    obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
-                    goal_t = torch.as_tensor(goal_vec, dtype=torch.float32,
-                                             device=self.device).unsqueeze(0)
-                    action = self.q_model(obs_t, goal_t).argmax(dim=1).item()
+                    action = self._q_forward(self.q_model, obs, goal_vec, motion).argmax(dim=1).item()
+                ms.commit(r.x, r.y, action)
 
                 raw_next, reward, term, trunc, _ = self.env.step(action)
                 obs = self.process_observation(raw_next["observation"])
@@ -234,6 +255,7 @@ class Agent:
             base         = self.env.unwrapped
             r            = base._robot
             desired_goal = self._reset_goal(base, desired_goal)
+            ms           = MotionState(self.n_actions)
 
             done = False
             ep_reward = 0.0
@@ -241,13 +263,12 @@ class Agent:
             while not done:
                 goal_vec = world_coords(r.x, r.y,
                                         desired_goal[0], desired_goal[1])
+                motion = ms.vec(r.x, r.y)
                 with torch.no_grad():
-                    obs_t  = obs.unsqueeze(0).float().to(self.device) / 255.0
-                    goal_t = torch.as_tensor(goal_vec, dtype=torch.float32,
-                                             device=self.device).unsqueeze(0)
-                    q      = self.q_model(obs_t, goal_t).squeeze(0)
+                    q      = self._q_forward(self.q_model, obs, goal_vec, motion).squeeze(0)
                     probs  = F.softmax(q / temp, dim=0)
                     action = int(torch.multinomial(probs, 1).item())
+                ms.commit(r.x, r.y, action)
 
                 raw_next, reward, term, trunc, _ = self.env.step(action)
                 obs = self.process_observation(raw_next["observation"])
@@ -316,6 +337,7 @@ class Agent:
             base         = self.env.unwrapped
             r            = base._robot
             desired_goal = self._reset_goal(base, desired_goal)
+            ms           = MotionState(self.n_actions)
 
             done = False
             episode_reward = 0.0
@@ -327,12 +349,16 @@ class Agent:
                 pos_prev     = np.array([r.x, r.y], dtype=np.float32)
                 goal_vec     = world_coords(r.x, r.y,
                                             desired_goal[0], desired_goal[1])
-                action       = self.select_action(obs, goal_vec)
+                motion_prev  = ms.vec(r.x, r.y)
+                action       = self.select_action(obs, goal_vec, motion_prev)
+                ms.commit(r.x, r.y, action)
 
                 raw_next, reward, term, trunc, _ = self.env.step(action)
                 next_obs     = self.process_observation(raw_next["observation"])
                 heading_next = r.angle
                 pos_next     = np.array([r.x, r.y], dtype=np.float32)
+                motion_next  = make_motion(self.n_actions, action,
+                                           pos_next[0] - pos_prev[0], pos_next[1] - pos_prev[1])
                 done = term or trunc
 
                 # Store term (not trunc): a timeout is not a terminal state, so the
@@ -344,6 +370,8 @@ class Agent:
                     achieved_next=pos_next,
                     heading_prev=heading_prev,
                     heading_next=heading_next,
+                    motion_prev=motion_prev,
+                    motion_next=motion_next,
                 )
                 episode_reward += float(reward)
                 episode_steps  += 1

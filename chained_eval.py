@@ -27,34 +27,41 @@ import homebot  # noqa: F401  (side-effect env registration)
 from homebot.goals import GOAL_NAMES, GOAL_THRESHOLD
 from evaluate import load_q_model, process_observation
 from goal_geometry import world_coords, distance, eval_step_budget
+from motion import MotionState
 from task_chain import DEFAULT_CHAIN, resolve_goal
 
 VALID_NAMES = set(GOAL_NAMES) | {"go_to_human"}
 
 
-def _select_action(model, obs, goal_xy, robot, device, readout, temp):
+def _select_action(model, obs, goal_xy, robot, device, readout, temp, motion):
     """One greedy/softmax action from the current obs + pose toward goal_xy."""
     with torch.no_grad():
         obs_t = obs.unsqueeze(0).float().to(device) / 255.0
         goal_vec = world_coords(robot.x, robot.y, goal_xy[0], goal_xy[1])
         goal_t = torch.as_tensor(goal_vec, dtype=torch.float32,
                                  device=device).unsqueeze(0)
-        q = model(obs_t, goal_t).squeeze(0)
+        motion_t = None
+        if getattr(model, "use_motion", False):
+            motion_t = torch.as_tensor(motion, dtype=torch.float32, device=device).unsqueeze(0)
+        q = model(obs_t, goal_t, motion_t).squeeze(0)
         if readout == "softmax":
             probs = F.softmax(q / temp, dim=0)
             return int(torch.multinomial(probs, 1).item())
         return int(q.argmax().item())
 
 
-def run_leg(model, env, base, obs, goal_xy, budget, device, readout, temp):
+def run_leg(model, env, base, obs, goal_xy, budget, device, readout, temp, ms):
     """Drive the navigator toward goal_xy until reached or budget exhausted.
+    ms is the per-episode MotionState (persists across legs).
 
     Returns (reached, steps, obs). obs is threaded back out so the next leg
     continues from the live observation without an env reset.
     """
     robot = base._robot
     for steps in range(1, budget + 1):
-        action = _select_action(model, obs, goal_xy, robot, device, readout, temp)
+        motion = ms.vec(robot.x, robot.y)
+        action = _select_action(model, obs, goal_xy, robot, device, readout, temp, motion)
+        ms.commit(robot.x, robot.y, action)
         next_obs, _, _, _, _ = env.step(action)
         obs = process_observation(next_obs)
         if distance(robot.x, robot.y, goal_xy[0], goal_xy[1]) <= GOAL_THRESHOLD:
@@ -76,6 +83,7 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0):
     raw_obs, _ = env.reset(seed=seed)
     obs = process_observation(raw_obs)
     robot = base._robot
+    ms = MotionState(env.action_space.n)  # motion persists across legs
 
     # Resolve every leg's target coordinate up front (the static orchestrated list
     # is coords fixed at plan time). Must happen before stepping: the robot picks
@@ -87,7 +95,7 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0):
     for name, (gx, gy) in targets:
         budget = max(1, int(eval_step_budget(distance(robot.x, robot.y, gx, gy)) * budget_mult))
         reached, steps, obs = run_leg(model, env, base, obs, (gx, gy),
-                                      budget, device, readout, temp)
+                                      budget, device, readout, temp, ms)
         results.append((name, reached, steps))
     return results
 
@@ -138,6 +146,8 @@ def main():
                         help=f"ordered goal names; valid: {sorted(VALID_NAMES)}")
     parser.add_argument("--head-norm", action="store_true",
                         help="checkpoint was trained with LayerNorm head")
+    parser.add_argument("--use-motion", action="store_true",
+                        help="checkpoint was trained with the motion input")
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--temp", type=float, default=0.01,
                         help="softmax temperature for the softmax readout")
@@ -167,7 +177,7 @@ def main():
     n_actions = env.action_space.n  # type: ignore[union-attr]
     model = load_q_model(args.checkpoint, n_actions, device,
                          goal_layers=args.goal_layers, head_layers=args.head_layers,
-                         head_norm=args.head_norm)
+                         head_norm=args.head_norm, use_motion=args.use_motion)
 
     print(f"\nchain: {args.chain}")
     print(f"checkpoint: {args.checkpoint} (goal_layers={args.goal_layers}, "

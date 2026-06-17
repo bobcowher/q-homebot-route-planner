@@ -8,9 +8,11 @@ class QModel(BaseModel):
     def __init__(self, action_dim, input_shape=(3, 96, 96), goal_dim=4,
                  goal_scale=(864.0, 576.0, 864.0, 576.0),
                  goal_hidden=128, fc_hidden=512,
-                 goal_layers=1, head_layers=1, head_norm=False):
+                 goal_layers=1, head_layers=1, head_norm=False,
+                 use_motion=False, motion_in_dim=None, motion_hidden=32):
         super(QModel, self).__init__()
         self.head_norm = head_norm
+        self.use_motion = use_motion
 
         # Coordinate reframing: goals arrive as absolute coords
         # [robot_x, robot_y, goal_x, goal_y] in raw map pixels (default map
@@ -35,9 +37,18 @@ class QModel(BaseModel):
             in_dim = goal_hidden
         self.goal_encoder = nn.ModuleList(g_layers)
 
+        # Previous-motion encoder (anti-oscillation): its own small projection of
+        # [one-hot(last_action) | velocity], fused into the head alongside the goal.
+        self.motion_encoder = None
+        motion_feat = 0
+        if use_motion:
+            motion_in_dim = motion_in_dim if motion_in_dim is not None else action_dim + 2
+            self.motion_encoder = nn.Linear(motion_in_dim, motion_hidden)
+            motion_feat = motion_hidden
+
         # Head: head_layers hidden layers (ReLU after each), then output. This is
         # the compositional reasoning block — the depth lever for the coord rep.
-        h_layers, in_dim = [], flat_size + goal_hidden
+        h_layers, in_dim = [], flat_size + goal_hidden + motion_feat
         for _ in range(head_layers):
             h_layers.append(nn.Linear(in_dim, fc_hidden))
             in_dim = fc_hidden
@@ -73,10 +84,14 @@ class QModel(BaseModel):
                 g = F.relu(g)
         return g
 
-    def forward(self, obs, goal):
+    def forward(self, obs, goal, motion=None):
         x = self._conv_forward(obs)
         g = self.encode_goal(goal)
-        x = torch.cat([x, g], dim=1)
+        parts = [x, g]
+        if self.motion_encoder is not None:
+            assert motion is not None, "use_motion model called without a motion vector"
+            parts.append(F.relu(self.motion_encoder(motion)))
+        x = torch.cat(parts, dim=1)
         for i, layer in enumerate(self.head):
             x = layer(x)
             if self.head_norms is not None:
