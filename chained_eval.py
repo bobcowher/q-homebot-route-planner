@@ -27,11 +27,9 @@ import homebot  # noqa: F401  (side-effect env registration)
 from homebot.goals import GOAL_NAMES, GOAL_THRESHOLD
 from evaluate import load_q_model, process_observation
 from goal_geometry import world_coords, distance, eval_step_budget
+from task_chain import DEFAULT_CHAIN, resolve_goal
 
-# All-5 sweep: every named location once. collect_trash last so any mid-leg trash
-# removal can't disturb earlier legs' coordinate resolution.
-DEFAULT_CHAIN = ["go_to_fridge", "deliver_drink", "go_to_door",
-                 "deliver_package", "collect_trash"]
+VALID_NAMES = set(GOAL_NAMES) | {"go_to_human"}
 
 
 def _select_action(model, obs, goal_xy, robot, device, readout, temp):
@@ -83,7 +81,7 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0):
     # is coords fixed at plan time). Must happen before stepping: the robot picks
     # up trash incidentally while traversing earlier legs, which would empty
     # trash_positions and make a later collect_trash leg unresolvable.
-    targets = [(name, base.goal_to_coordinates(name)) for name in chain]
+    targets = [(name, resolve_goal(base, name)) for name in chain]
 
     results = []
     for name, (gx, gy) in targets:
@@ -99,34 +97,36 @@ def _print_readout(label, episodes_results, chain):
     n_ep = len(episodes_results)
     print(f"\n=== readout: {label} | {n_ep} episode(s) ===")
 
-    # Per-leg reach counts across episodes.
-    per_leg_reached = {name: 0 for name in chain}
-    chain_completions = []   # legs reached / total, per episode
+    # Per-leg reach counts indexed by POSITION (a name like go_to_human can
+    # repeat in the chain, so name-keying would collapse the return trips).
+    n_legs = len(chain)
+    per_leg_reached = [0] * n_legs
+    scores = []              # legs reached this episode (0..n_legs)
     full_chain = 0           # episodes with every leg reached
 
     for ep_i, legs in enumerate(episodes_results):
         reached_here = sum(1 for _, r, _ in legs if r)
-        chain_completions.append(reached_here / len(legs))
-        if reached_here == len(legs):
+        scores.append(reached_here)
+        if reached_here == n_legs:
             full_chain += 1
-        for name, r, _ in legs:
+        for i, (_, r, _) in enumerate(legs):
             if r:
-                per_leg_reached[name] += 1
+                per_leg_reached[i] += 1
         if n_ep <= 3:  # detailed leg table only for small runs
-            print(f"  episode {ep_i}:")
+            print(f"  episode {ep_i}: score {reached_here}/{n_legs}")
             for name, r, steps in legs:
                 mark = "reached" if r else "TIMEOUT"
                 print(f"    {name:<16} {mark:<8} steps={steps}")
 
-    print("  per-leg reach rate:")
-    for name in chain:
-        print(f"    {name:<16} {per_leg_reached[name]}/{n_ep} "
-              f"= {100.0 * per_leg_reached[name] / n_ep:.0f}%")
-    mean_completion = 100.0 * sum(chain_completions) / n_ep
-    print(f"  chain completion (mean legs reached): {mean_completion:.0f}%")
-    print(f"  full-chain success (all legs): {full_chain}/{n_ep} "
+    print("  per-leg reach rate (by position):")
+    for i, name in enumerate(chain):
+        print(f"    {i+1}. {name:<16} {per_leg_reached[i]}/{n_ep} "
+              f"= {100.0 * per_leg_reached[i] / n_ep:.0f}%")
+    mean_score = sum(scores) / n_ep
+    print(f"  MEAN SCORE: {mean_score:.2f} / {n_legs}")
+    print(f"  full-chain (all {n_legs}): {full_chain}/{n_ep} "
           f"= {100.0 * full_chain / n_ep:.0f}%")
-    return mean_completion, 100.0 * full_chain / n_ep
+    return mean_score, 100.0 * full_chain / n_ep
 
 
 def main():
@@ -135,7 +135,9 @@ def main():
     parser.add_argument("--goal-layers", type=int, default=2)
     parser.add_argument("--head-layers", type=int, default=4)
     parser.add_argument("--chain", nargs="+", default=DEFAULT_CHAIN,
-                        help=f"ordered goal names; valid: {GOAL_NAMES}")
+                        help=f"ordered goal names; valid: {sorted(VALID_NAMES)}")
+    parser.add_argument("--head-norm", action="store_true",
+                        help="checkpoint was trained with LayerNorm head")
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--temp", type=float, default=0.01,
                         help="softmax temperature for the softmax readout")
@@ -147,9 +149,9 @@ def main():
                         choices=["greedy", "softmax"])
     args = parser.parse_args()
 
-    bad = [n for n in args.chain if n not in GOAL_NAMES]
+    bad = [n for n in args.chain if n not in VALID_NAMES]
     if bad:
-        parser.error(f"unknown goal name(s) {bad}; valid: {GOAL_NAMES}")
+        parser.error(f"unknown goal name(s) {bad}; valid: {sorted(VALID_NAMES)}")
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     env = gym.make(
@@ -164,7 +166,8 @@ def main():
     )
     n_actions = env.action_space.n  # type: ignore[union-attr]
     model = load_q_model(args.checkpoint, n_actions, device,
-                         goal_layers=args.goal_layers, head_layers=args.head_layers)
+                         goal_layers=args.goal_layers, head_layers=args.head_layers,
+                         head_norm=args.head_norm)
 
     print(f"\nchain: {args.chain}")
     print(f"checkpoint: {args.checkpoint} (goal_layers={args.goal_layers}, "
@@ -179,9 +182,10 @@ def main():
         ]
         summary[readout] = _print_readout(readout, episodes_results, args.chain)
 
-    print("\n=== Summary (chain completion / full-chain) ===")
-    for readout, (comp, full) in summary.items():
-        print(f"{readout:<8} {comp:.0f}% / {full:.0f}%")
+    n_legs = len(args.chain)
+    print(f"\n=== Summary (mean score / {n_legs} | full-chain%) ===")
+    for readout, (score, full) in summary.items():
+        print(f"{readout:<8} {score:.2f} / {n_legs}   {full:.0f}%")
 
 
 if __name__ == "__main__":
