@@ -8,8 +8,9 @@ class QModel(BaseModel):
     def __init__(self, action_dim, input_shape=(3, 96, 96), goal_dim=4,
                  goal_scale=(864.0, 576.0, 864.0, 576.0),
                  goal_hidden=128, fc_hidden=512,
-                 goal_layers=1, head_layers=1):
+                 goal_layers=1, head_layers=1, head_norm=False):
         super(QModel, self).__init__()
+        self.head_norm = head_norm
 
         # Coordinate reframing: goals arrive as absolute coords
         # [robot_x, robot_y, goal_x, goal_y] in raw map pixels (default map
@@ -41,12 +42,18 @@ class QModel(BaseModel):
             h_layers.append(nn.Linear(in_dim, fc_hidden))
             in_dim = fc_hidden
         self.head = nn.ModuleList(h_layers)
+        # LayerNorm after each head Linear (before ReLU): stabilizes value
+        # learning, curbs overestimation, and closes the train/eval gap without
+        # the bootstrap-noise problem naked dropout causes. None == off.
+        self.head_norms = (nn.ModuleList([nn.LayerNorm(fc_hidden) for _ in range(head_layers)])
+                           if head_norm else None)
         self.output = nn.Linear(fc_hidden, action_dim)
 
         self.apply(self._weights_init)
 
         print(f"QModel: input={input_shape}, conv_flat={flat_size}, goal_dim={goal_dim}, "
-              f"goal_layers={goal_layers}, head_layers={head_layers}, actions={action_dim}")
+              f"goal_layers={goal_layers}, head_layers={head_layers}, "
+              f"head_norm={head_norm}, actions={action_dim}")
 
     def _conv_forward(self, x):
         x = F.relu(self.conv1(x))
@@ -70,8 +77,11 @@ class QModel(BaseModel):
         x = self._conv_forward(obs)
         g = self.encode_goal(goal)
         x = torch.cat([x, g], dim=1)
-        for layer in self.head:
-            x = F.relu(layer(x))
+        for i, layer in enumerate(self.head):
+            x = layer(x)
+            if self.head_norms is not None:
+                x = self.head_norms[i](x)
+            x = F.relu(x)
         return self.output(x)
 
     def _weights_init(self, m):

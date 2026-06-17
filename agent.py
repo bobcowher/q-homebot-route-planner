@@ -21,6 +21,7 @@ class Agent:
                        target_update_interval: int = 1000,
                        goal_layers: int = 1,
                        head_layers: int = 1,
+                       head_norm: bool = False,
                        random_goal_tiles: bool = False) -> None:
         self.env = env
         # When True, each episode's goal is a uniformly-sampled valid floor tile
@@ -54,6 +55,7 @@ class Agent:
             goal_dim=self.goal_dim,
             goal_layers=goal_layers,
             head_layers=head_layers,
+            head_norm=head_norm,
         ).to(self.device)
 
         self.target_q_model = QModel(
@@ -62,6 +64,7 @@ class Agent:
             goal_dim=self.goal_dim,
             goal_layers=goal_layers,
             head_layers=head_layers,
+            head_norm=head_norm,
         ).to(self.device)
         self.target_q_model.load_state_dict(self.q_model.state_dict())
 

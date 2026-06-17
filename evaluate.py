@@ -37,13 +37,13 @@ def make_env():
     return env
 
 
-def load_q_model(path, n_actions, device, goal_layers=1, head_layers=1):
+def load_q_model(path, n_actions, device, goal_layers=1, head_layers=1, head_norm=False):
     state = torch.load(path, map_location=device)
     if "q_model" in state:  # best.pt wraps the state_dict with metadata
         print(f"  ({path} is a best-checkpoint from episode {state.get('episode')})")
         state = state["q_model"]
     model = QModel(action_dim=n_actions, goal_layers=goal_layers,
-                   head_layers=head_layers).to(device)
+                   head_layers=head_layers, head_norm=head_norm).to(device)
     model.load_state_dict(state)
     model.eval()
     return model
