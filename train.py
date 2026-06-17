@@ -14,11 +14,13 @@ env = gym.make(
     random_start=True,   # env owns spawn now (uniform valid tile, >=60px from goals)
 )
 
-# LayerNorm A/B vs run 295 (depth-4, random-tile, no norm). head_norm=True adds
-# LayerNorm after each head Linear — the value-RL-safe head regularizer. Target:
-# close 295's train/eval gap (train EMA 0.88 vs greedy eval 0.51) and stabilize.
-# Episodes cut 1200->900: 295's eval plateaued by ~ep700-750, the rest was noise.
+# Main baseline: locked depth-4 navigator (goal_layers=2/head=4), random-tile
+# goals (whole-map go-to objective). LayerNorm left OFF — its A/B (run 296) only
+# redistributed competence (fridge up, recliner down), net-neutral per-goal and
+# worse on the chain score. The real metric (Eval/chain_score, out of 5) is now
+# logged every 10 episodes. Episodes 900: eval plateaus by ~ep700-750.
 agent = Agent(env=env, max_buffer_size=200000, goal_layers=2, head_layers=4,
-              head_norm=True, random_goal_tiles=True)
+              random_goal_tiles=True)
 
-agent.train(episodes=900, batch_size=64, eval_interval=50, eval_episodes=20)
+agent.train(episodes=900, batch_size=64, eval_interval=50, eval_episodes=20,
+            chain_eval_interval=10)

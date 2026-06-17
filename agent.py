@@ -11,6 +11,8 @@ from buffer import ReplayBuffer
 from episode_buffer import EpisodeBuffer
 from goal_geometry import world_coords
 from models.q_model import QModel
+from task_chain import DEFAULT_CHAIN
+from chained_eval import run_chain
 from torch.utils.tensorboard.writer import SummaryWriter
 
 
@@ -85,6 +87,10 @@ class Agent:
         self.updates_per_step = 1
 
         self.best_reach_rate = -1.0
+
+        # Lazily-built non-goal env for the chained task-score metric (the real
+        # deployment metric: trash>>fridge>>human>>door>>human, score out of N).
+        self._chain_env = None
 
     def process_observation(self, obs):
         obs = cv2.resize(obs, (96, 96), interpolation=cv2.INTER_NEAREST)
@@ -257,8 +263,33 @@ class Agent:
         avg_steps = sum(success_steps) / len(success_steps) if success_steps else 0.0
         return successes / n_episodes, avg_steps
 
+    def chain_eval(self, n_episodes: int = 5):
+        """The real deployment metric: run the static task chain in the non-goal
+        env (all task items loaded), greedy, pose persisting leg-to-leg. Returns
+        (mean_score, full_chain_rate) where score is legs reached out of
+        len(DEFAULT_CHAIN). Reuses the offline run_chain so the TB number equals
+        what chained_eval.py reports. Fixed seeds -> low-noise curve."""
+        if self._chain_env is None:
+            self._chain_env = gym.make(
+                "HomeBot2D-V1", render_mode="rgb_array", action_mode="discrete",
+                obs_resolution=(96, 96), n_trash=2, max_steps=20000,
+                map_name="default", random_start=True,
+            )
+        self.q_model.eval()
+        n_legs = len(DEFAULT_CHAIN)
+        total, full = 0, 0
+        for i in range(n_episodes):
+            legs = run_chain(self.q_model, self._chain_env, DEFAULT_CHAIN,
+                             self.device, "greedy", 0.01, seed=i)
+            reached = sum(1 for _, r, _ in legs if r)
+            total += reached
+            if reached == n_legs:
+                full += 1
+        self.q_model.train()
+        return total / n_episodes, full / n_episodes
+
     def train(self, episodes=1000, batch_size=64, run_tag=None,
-              eval_interval=50, eval_episodes=20):
+              eval_interval=50, eval_episodes=20, chain_eval_interval=10):
         if run_tag is None:
             try:
                 refs = subprocess.check_output(
@@ -370,6 +401,14 @@ class Agent:
                 if reach_rate > self.best_reach_rate:
                     self.best_reach_rate = reach_rate
                     self.save_best(episode, reach_rate)
+
+            # Chained task score — the real deployment metric, logged often.
+            if episode % chain_eval_interval == 0:
+                chain_score, chain_full = self.chain_eval()
+                writer.add_scalar("Eval/chain_score", chain_score, episode)
+                writer.add_scalar("Eval/chain_full", chain_full, episode)
+                print(f"  [Chain] episode {episode}: score={chain_score:.2f}/"
+                      f"{len(DEFAULT_CHAIN)} | full_chain={chain_full:.2f}")
 
     def test(self, episodes=10):
         self.q_model.eval()
