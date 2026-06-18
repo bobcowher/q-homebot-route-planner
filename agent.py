@@ -98,7 +98,7 @@ class Agent:
         # episode block, which silently raised UTD as episodes shortened).
         self.updates_per_step = 1
 
-        self.best_reach_rate = -1.0
+        self.best_chain_score = -1.0
 
         # Lazily-built non-goal env for the chained task-score metric (the real
         # deployment metric: trash>>fridge>>human>>door>>human, score out of N).
@@ -182,14 +182,14 @@ class Agent:
         self.q_model.load_the_model("q_model", device=self.device)
         self.target_q_model.load_state_dict(self.q_model.state_dict())
 
-    def save_best(self, episode, reach_rate):
+    def save_best(self, episode, chain_score):
         path = "checkpoints/q_model_best.pt"
         torch.save({
             "q_model": self.q_model.state_dict(),
             "episode": episode,
-            "reach_rate": reach_rate,
+            "chain_score": chain_score,
         }, path)
-        print(f"  New best checkpoint saved (episode={episode}, reach_rate={reach_rate:.3f})")
+        print(f"  New best checkpoint saved (episode={episode}, chain_score={chain_score:.2f})")
 
     def greedy_eval(self, n_episodes: int = 20) -> float:
         """Greedy eval mirroring her/evaluate.py (full episode, reward>0.5), so
@@ -310,7 +310,8 @@ class Agent:
         return total / n_episodes, full / n_episodes
 
     def train(self, episodes=1000, batch_size=64, run_tag=None,
-              eval_interval=50, eval_episodes=20, chain_eval_interval=10):
+              eval_interval=50, eval_episodes=20, chain_eval_interval=10,
+              her_anneal_start=None):
         if run_tag is None:
             try:
                 refs = subprocess.check_output(
@@ -384,12 +385,22 @@ class Agent:
                     if self.memory.can_sample(batch_size):
                         episode_loss += self.train_step(batch_size)
 
+            # HER curriculum: bootstrap at full K, then anneal hindsight 2 -> 0
+            # after her_anneal_start so the buffer's marginal inflow leans toward
+            # real (un-relabeled) data — like a fine-tune off the relabeled diet.
+            k_eff = self.episode_buffer.K
+            if her_anneal_start is not None and episode >= her_anneal_start:
+                span = max(1, episodes - her_anneal_start)
+                frac = min(1.0, (episode - her_anneal_start) / span)
+                k_eff = self.episode_buffer.K * (1.0 - frac)
             self.episode_buffer.send_to(
                 self.memory,
                 desired_goal=desired_goal,
                 compute_reward=self.env.unwrapped.compute_reward,  # type: ignore[attr-defined]
+                k=k_eff,
             )
             self.episode_buffer.clear()
+            writer.add_scalar("Train/hindsight_k", k_eff, episode)
 
             self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
 
@@ -426,17 +437,19 @@ class Agent:
                     print(f"  [Eval] episode {episode}: softmax(t={temp}) "
                           f"reach_rate={sm_reach:.3f} | avg_success_steps={sm_steps:.0f}")
 
-                if reach_rate > self.best_reach_rate:
-                    self.best_reach_rate = reach_rate
-                    self.save_best(episode, reach_rate)
-
-            # Chained task score — the real deployment metric, logged often.
+            # Chained task score — the real deployment metric, logged often, and
+            # the criterion for the "best" checkpoint (greedy reach_rate selected
+            # the wrong models: it's a weaker readout than what we deploy on).
             if episode % chain_eval_interval == 0:
                 chain_score, chain_full = self.chain_eval()
                 writer.add_scalar("Eval/chain_score", chain_score, episode)
                 writer.add_scalar("Eval/chain_full", chain_full, episode)
                 print(f"  [Chain] episode {episode}: score={chain_score:.2f}/"
                       f"{len(DEFAULT_CHAIN)} | full_chain={chain_full:.2f}")
+
+                if chain_score > self.best_chain_score:
+                    self.best_chain_score = chain_score
+                    self.save_best(episode, chain_score)
 
     def test(self, episodes=10):
         self.q_model.eval()

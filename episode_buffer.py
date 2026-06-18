@@ -66,14 +66,21 @@ class EpisodeBuffer:
         replay_buffer,
         desired_goal: np.ndarray,
         compute_reward: Callable,
+        k: float | None = None,
     ) -> None:
-        """Write original transitions then K hindsight-relabeled copies.
+        """Write original transitions then k hindsight-relabeled copies.
 
         Strategy: future. Goals stored as absolute coords
         [robot_x, robot_y, goal_x, goal_y]; the robot-pose half is the pose at
         that transition, the goal half is the (desired or hindsight) target.
+
+        `k` is the (possibly fractional) hindsight count per transition; defaults
+        to the class K. The HER-curriculum anneals it 2 -> 0 over training, so a
+        float is rounded stochastically per transition (e.g. k=0.4 -> 1 relabel
+        40% of the time) to hit the target ratio in expectation.
         """
         dg = desired_goal  # absolute map-px (x, y)
+        k = self.K if k is None else k
 
         # Pass 1: original transitions (env reward, episode desired_goal)
         for t in self._transitions:
@@ -92,8 +99,12 @@ class EpisodeBuffer:
             future = self._transitions[i + 1:]
             if not future:
                 continue
-            k = min(self.K, len(future))
-            for hg_t in random.sample(future, k):
+            # Stochastic round of the (possibly fractional) curriculum k.
+            kk = int(k) + (1 if random.random() < (k - int(k)) else 0)
+            kk = min(kk, len(future))
+            if kk <= 0:
+                continue
+            for hg_t in random.sample(future, kk):
                 hindsight_goal   = hg_t.achieved_next  # absolute map-px
                 hindsight_reward = float(compute_reward(
                     t.achieved_next[np.newaxis],
