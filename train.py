@@ -14,18 +14,17 @@ env = gym.make(
     random_start=True,   # env owns spawn now (uniform valid tile, >=60px from goals)
 )
 
-# LOCKED CURRICULUM (run 303), extended to find the plateau. The HER curriculum
-# cracked cross-room routing: bootstrap on heavy hindsight (K=2) for 600 episodes,
-# then anneal hindsight 2 -> 0 over the rest so the marginal inflow leans toward
-# real (un-relabeled) data, while the 200k buffer keeps relabeled goal DIVERSITY
-# as ballast (smaller buffers choke that diversity and underperform — run 304).
-# 303 (1200ep) hit chain 3.85/5 greedy with fridge/door 0->70%+, and chain_score
-# was still rising at the end. This run pushes to 1800 to find where it tops out.
-# NOTE: anneal end scales with episodes, so k reaches ~0 at ep1800 here (a gentler
-# taper than 303's 600->1200). depth-4, random-tile, no motion.
-# Watch Eval/chain_score (does it keep climbing past 1200?), Train/hindsight_k.
+# CURRICULUM + MOTION A/B arm vs run 305 (curriculum, no motion). Same locked
+# curriculum as 303/305 (K=2 bootstrap 600, anneal 2->0 to ep1800, 200k buffer),
+# but motion ON. Motion-input was a wash when tested ALONE (runs 299/301) — but
+# that was under the old diet where broken routing capped the score and masked
+# any anti-loop benefit. The curriculum cracked routing (fridge/door 0->70%+);
+# the residual failure is the greedy action loop, which is exactly what motion
+# targets. This is the fair re-test: does [last action | velocity] sand down the
+# residual loops on top of the curriculum? Kill-or-cure for motion.
+# Watch Eval/chain_score vs 305, and Eval/avg_success_steps (loop/directness).
 agent = Agent(env=env, max_buffer_size=200000, goal_layers=2, head_layers=4,
-              use_motion=False, random_goal_tiles=True)
+              use_motion=True, random_goal_tiles=True)
 
 agent.train(episodes=1800, batch_size=64, eval_interval=50, eval_episodes=20,
             chain_eval_interval=10, her_anneal_start=600)
