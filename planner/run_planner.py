@@ -22,7 +22,7 @@ def main():
     agent = PlannerAgent(LLMClient(base_url=args.base_url, model=args.model), nav)
     response = agent.handle_utterance(args.utterance)
     print(f"\nROBOT: {response}")
-    print(f"STATE: {nav.world.state()}")
+    print(f"STATE: {nav.state()}")
 
 
 if __name__ == "__main__":

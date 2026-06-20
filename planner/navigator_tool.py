@@ -36,6 +36,11 @@ class NavigatorTool:
         self.ms = MotionState(self.env.action_space.n)
         return self.world.state()
 
+    def state(self) -> dict:
+        """Delegate to the world model so callers (e.g. eval_planner.score_task)
+        can read state via nav.state() without reaching into nav.world."""
+        return self.world.state()
+
     def go_to(self, destination: str) -> dict:
         try:
             gx, gy = self.world.resolve(destination)

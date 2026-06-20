@@ -15,3 +15,10 @@ def test_unknown_destination_is_error_not_crash():
     nav.reset(seed=0)
     out = nav.go_to("bogus")
     assert out["reached"] is False and "error" in out
+
+
+def test_state_delegates_to_world():
+    nav = NavigatorTool()
+    nav.reset(seed=0)
+    assert nav.state() == nav.world.state()
+    assert "trash_remaining" in nav.state()
