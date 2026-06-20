@@ -53,7 +53,17 @@ def _select_action(model, obs, goal_xy, robot, device, readout, temp, motion):
             motion_t = torch.as_tensor(motion, dtype=torch.float32, device=device).unsqueeze(0)
         q = model(obs_t, goal_t, motion_t).squeeze(0)
         if readout == "softmax":
+            # Absolute temperature (correct for a soft-Q model: temp == alpha).
             probs = F.softmax(q / temp, dim=0)
+            return int(torch.multinomial(probs, 1).item())
+        if readout == "softmax_rel":
+            # Scale-invariant: temperature relative to the per-state Q spread, so
+            # `temp` is a unitless fraction that transfers across checkpoints. A
+            # near-tie (tiny std) -> ~uniform (explore the tie); a confident state
+            # (large std) -> sharp (exploit). Breaks limit cycles without a
+            # Q-magnitude-specific magic number.
+            scale = temp * (q.std() + 1e-8)
+            probs = F.softmax(q / scale, dim=0)
             return int(torch.multinomial(probs, 1).item())
         return int(q.argmax().item())
 
@@ -166,7 +176,7 @@ def main():
     parser.add_argument("--budget-mult", type=float, default=1.0,
                         help="scale per-leg step budget (>1 relaxes the anti-circling cap)")
     parser.add_argument("--readouts", nargs="+", default=["greedy", "softmax"],
-                        choices=["greedy", "softmax"])
+                        choices=["greedy", "softmax", "softmax_rel"])
     args = parser.parse_args()
 
     bad = [n for n in args.chain if n not in VALID_NAMES]
