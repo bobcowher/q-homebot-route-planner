@@ -9,7 +9,7 @@ import cv2
 import datetime
 from buffer import ReplayBuffer
 from episode_buffer import EpisodeBuffer
-from goal_geometry import world_coords
+from goal_geometry import world_coords, spin_fraction, spin_thresholds, SPIN_WINDOW
 from motion import MotionState, motion_dim
 from models.q_model import QModel
 from task_chain import DEFAULT_CHAIN
@@ -319,7 +319,11 @@ class Agent:
         env (all task items loaded), greedy, pose persisting leg-to-leg. Returns
         (mean_score, full_chain_rate) where score is legs reached out of
         len(DEFAULT_CHAIN). Reuses the offline run_chain so the TB number equals
-        what chained_eval.py reports. Fixed seeds -> low-noise curve."""
+        what chained_eval.py reports. Fixed seeds -> low-noise curve.
+
+        Also returns mean_spin: the spin fraction (scripts/spin_metric.py, shared
+        spin_fraction) averaged over every leg -- the metric this experiment
+        actually targets, so it's watchable live instead of only post-hoc."""
         if self._chain_env is None:
             self._chain_env = gym.make(
                 "HomeBot2D-V1", render_mode="rgb_array", action_mode="discrete",
@@ -333,16 +337,21 @@ class Agent:
         # and is comparable to the hard-Q champion's softmax readout.
         readout = "softmax" if self.soft_q else "greedy"
         temp = self.soft_alpha if self.soft_q else 0.01
+        move_min, net_max = spin_thresholds(SPIN_WINDOW)
         total, full = 0, 0
+        spins = []
         for i in range(n_episodes):
             legs = run_chain(self.q_model, self._chain_env, DEFAULT_CHAIN,
                              self.device, readout, temp, seed=i)
-            reached = sum(1 for _, r, _ in legs if r)
+            reached = sum(1 for _, r, *_ in legs if r)
             total += reached
             if reached == n_legs:
                 full += 1
+            spins.extend(spin_fraction(pos, SPIN_WINDOW, move_min, net_max)
+                         for _, _, _, pos in legs)
         self.q_model.train()
-        return total / n_episodes, full / n_episodes
+        mean_spin = sum(spins) / len(spins) if spins else 0.0
+        return total / n_episodes, full / n_episodes, mean_spin
 
     def train(self, episodes=1000, batch_size=64, run_tag=None,
               eval_interval=50, eval_episodes=20, chain_eval_interval=10,
@@ -478,11 +487,13 @@ class Agent:
             # the criterion for the "best" checkpoint (greedy reach_rate selected
             # the wrong models: it's a weaker readout than what we deploy on).
             if episode % chain_eval_interval == 0:
-                chain_score, chain_full = self.chain_eval()
+                chain_score, chain_full, chain_spin = self.chain_eval()
                 writer.add_scalar("Eval/chain_score", chain_score, episode)
                 writer.add_scalar("Eval/chain_full", chain_full, episode)
+                writer.add_scalar("Eval/chain_spin_fraction", chain_spin, episode)
                 print(f"  [Chain] episode {episode}: score={chain_score:.2f}/"
-                      f"{len(DEFAULT_CHAIN)} | full_chain={chain_full:.2f}")
+                      f"{len(DEFAULT_CHAIN)} | full_chain={chain_full:.2f} | "
+                      f"spin={chain_spin:.3f}")
 
                 if chain_score > self.best_chain_score:
                     self.best_chain_score = chain_score

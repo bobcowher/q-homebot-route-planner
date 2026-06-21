@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import homebot  # noqa: F401  (env registration)
 from homebot.goals import GOAL_THRESHOLD
 from evaluate import load_q_model, process_observation
-from goal_geometry import distance, eval_step_budget, ROBOT_STEP_PX
+from goal_geometry import distance, eval_step_budget, ROBOT_STEP_PX, spin_fraction
 from motion import MotionState
 from chained_eval import _select_action, REACH_OVERRIDE
 from task_chain import DEFAULT_CHAIN, resolve_goal
@@ -39,26 +39,8 @@ def _d(a, b):
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def spin_fraction(positions, window, move_min, net_max):
-    """Fraction of steps that sit inside a 'moving but not progressing' window --
-    the signature of a limit cycle. positions: list of (x, y) per step.
-
-    A step t (t >= window) is spinning when, over the trailing `window` steps, the
-    path length walked is >= move_min (the robot really moved, so it isn't a
-    wall-stick) yet the net displacement from window-start is <= net_max (it
-    ended up essentially where it began). Returns 0.0 for traces shorter than the
-    window."""
-    n = len(positions)
-    if n <= window:
-        return 0.0
-    spin = 0
-    for t in range(window, n):
-        net = _d(positions[t], positions[t - window])
-        path = sum(_d(positions[i - 1], positions[i])
-                   for i in range(t - window + 1, t + 1))
-        if path >= move_min and net <= net_max:
-            spin += 1
-    return spin / (n - window)
+# spin_fraction now lives in goal_geometry (shared with the in-train chain eval);
+# re-exported above so callers and the test keep importing it from here.
 
 
 def leg_positions(model, env, base, obs, goal_xy, budget, device, readout, temp, ms, reach):

@@ -11,10 +11,43 @@ GOAL_RADIUS = 31.0
 ROBOT_STEP_PX = 4.0      # homebot DISCRETE_SPEED
 EVAL_BUDGET_MULT = 3
 
+# Spinning / limit-cycle detection (scripts/spin_metric.py + the in-train metric).
+SPIN_WINDOW = 8
+
 
 def distance(ax: float, ay: float, bx: float, by: float) -> float:
     """Euclidean distance between two points in pixel space."""
     return math.hypot(bx - ax, by - ay)
+
+
+def spin_thresholds(window: int = SPIN_WINDOW):
+    """Default (move_min, net_max) for spin_fraction, in pixels. A window 'spins'
+    when it walked >= half the window's worth of steps but ended within ~2 steps
+    of where it began. Defaults track ROBOT_STEP_PX so they follow the step size."""
+    return 0.5 * window * ROBOT_STEP_PX, 2.0 * ROBOT_STEP_PX
+
+
+def spin_fraction(positions, window, move_min, net_max):
+    """Fraction of steps inside a 'moving but not progressing' window -- the
+    signature of a limit cycle. positions: list of (x, y) per step.
+
+    A step t (t >= window) spins when, over the trailing `window` steps, the path
+    walked is >= move_min (really moved, so not a wall-stick) yet the net
+    displacement from window-start is <= net_max (ended ~where it began). Returns
+    0.0 for traces shorter than the window."""
+    n = len(positions)
+    if n <= window:
+        return 0.0
+    spin = 0
+    for t in range(window, n):
+        net = distance(positions[t - window][0], positions[t - window][1],
+                       positions[t][0], positions[t][1])
+        path = sum(distance(positions[i - 1][0], positions[i - 1][1],
+                            positions[i][0], positions[i][1])
+                   for i in range(t - window + 1, t + 1))
+        if path >= move_min and net <= net_max:
+            spin += 1
+    return spin / (n - window)
 
 
 def ego_vector(rx: float, ry: float, rtheta: float, gx: float, gy: float) -> np.ndarray:

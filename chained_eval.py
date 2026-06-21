@@ -82,19 +82,22 @@ def run_leg(model, env, base, obs, goal_xy, budget, device, readout, temp, ms, r
     ms is the per-episode MotionState (persists across legs); reach is the
     per-leg reach radius in px (tighter for the walk-on door than for fixtures).
 
-    Returns (reached, steps, obs). obs is threaded back out so the next leg
-    continues from the live observation without an env reset.
+    Returns (reached, steps, obs, positions). obs is threaded back out so the
+    next leg continues from the live observation without an env reset. positions
+    is the per-step (x, y) trace (incl. the start pose) for the spin metric.
     """
     robot = base._robot
+    positions = [(robot.x, robot.y)]
     for steps in range(1, budget + 1):
         motion = ms.vec(robot.x, robot.y)
         action = _select_action(model, obs, goal_xy, robot, device, readout, temp, motion)
         ms.commit(robot.x, robot.y, action)
         next_obs, _, _, _, _ = env.step(action)
         obs = process_observation(next_obs)
+        positions.append((robot.x, robot.y))
         if distance(robot.x, robot.y, goal_xy[0], goal_xy[1]) <= reach:
-            return True, steps, obs
-    return False, budget, obs
+            return True, steps, obs, positions
+    return False, budget, obs, positions
 
 
 def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0):
@@ -105,7 +108,7 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0):
     anti-circling budget; larger relaxes it toward the training eval's full
     episode length for comparability).
 
-    Returns list of (name, reached, steps) per leg.
+    Returns list of (name, reached, steps, positions) per leg.
     """
     base = env.unwrapped
     raw_obs, _ = env.reset(seed=seed)
@@ -124,12 +127,12 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0):
         budget = max(1, int(eval_step_budget(distance(robot.x, robot.y, gx, gy)) * budget_mult))
         reach = REACH_OVERRIDE.get(name, GOAL_THRESHOLD)
         before = world_state(base)
-        arrived, steps, obs = run_leg(model, env, base, obs, (gx, gy),
-                                      budget, device, readout, temp, ms, reach)
+        arrived, steps, obs, positions = run_leg(model, env, base, obs, (gx, gy),
+                                                 budget, device, readout, temp, ms, reach)
         # Honest score: the leg counts only if the TASK actually happened (state
         # delta), not merely that the robot got near the coordinate.
         reached = leg_succeeded(name, before, world_state(base), arrived)
-        results.append((name, reached, steps))
+        results.append((name, reached, steps, positions))
     return results
 
 
@@ -146,16 +149,16 @@ def _print_readout(label, episodes_results, chain):
     full_chain = 0           # episodes with every leg reached
 
     for ep_i, legs in enumerate(episodes_results):
-        reached_here = sum(1 for _, r, _ in legs if r)
+        reached_here = sum(1 for _, r, *_ in legs if r)
         scores.append(reached_here)
         if reached_here == n_legs:
             full_chain += 1
-        for i, (_, r, _) in enumerate(legs):
+        for i, (_, r, *_) in enumerate(legs):
             if r:
                 per_leg_reached[i] += 1
         if n_ep <= 3:  # detailed leg table only for small runs
             print(f"  episode {ep_i}: score {reached_here}/{n_legs}")
-            for name, r, steps in legs:
+            for name, r, steps, _ in legs:
                 mark = "reached" if r else "TIMEOUT"
                 print(f"    {name:<16} {mark:<8} steps={steps}")
 
