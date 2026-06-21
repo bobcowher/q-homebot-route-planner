@@ -15,10 +15,15 @@ from planner.world_model import WorldModel, DEST_TO_ENV
 
 class NavigatorTool:
     def __init__(self, checkpoint="checkpoints/run314_q_model_best.pt",
-                 readout="softmax_rel", temp=0.1, device=None):
+                 readout="softmax_rel", temp=0.1, device=None,
+                 render_mode="rgb_array"):
+        # render_mode="human" opens a window and auto-shows every step (the env's
+        # _get_obs draws to the window in human mode) -- used by the chat REPL so
+        # you can watch the robot drive. Default "rgb_array" stays headless for
+        # eval/smoke/tests.
         self.device = device or ("cuda:0" if torch.cuda.is_available() else "cpu")
         self.env = gym.make(
-            "HomeBot2D-V1", render_mode="rgb_array", action_mode="discrete",
+            "HomeBot2D-V1", render_mode=render_mode, action_mode="discrete",
             obs_resolution=(96, 96), n_trash=2, max_steps=20000,
             map_name="default", random_start=True)
         self.base = self.env.unwrapped

@@ -3,6 +3,7 @@ from planner.navigator_tool import NavigatorTool
 
 def test_reset_returns_state_and_go_to_returns_outcome_shape():
     nav = NavigatorTool()  # loads the 314 champion
+    assert nav.env.render_mode == "rgb_array"  # default stays headless
     s = nav.reset(seed=0)
     assert "robot_xy" in s
     out = nav.go_to("human")

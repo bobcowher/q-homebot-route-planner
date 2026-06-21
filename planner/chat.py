@@ -94,13 +94,15 @@ def main():
     p.add_argument("--base-url", default="http://localhost:11434/v1")
     p.add_argument("--model", default="qwen2.5:14b-instruct")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--render-mode", default="human", choices=["human", "rgb_array"],
+                   help="human opens a window so you can watch the robot drive")
     args = p.parse_args()
 
     from planner.navigator_tool import NavigatorTool
     from planner.llm_client import LLMClient
     from planner.agent_loop import PlannerAgent
 
-    nav = NavigatorTool()
+    nav = NavigatorTool(render_mode=args.render_mode)
     agent = PlannerAgent(LLMClient(base_url=args.base_url, model=args.model), nav)
     ChatSession(agent, nav, seed=args.seed).start()
 
