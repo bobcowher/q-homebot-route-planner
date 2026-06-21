@@ -14,6 +14,7 @@ import argparse
 import os
 import string
 import sys
+from datetime import datetime
 
 # Allow direct-script invocation: put the repo root on the path so the absolute
 # `planner.` package imports resolve.
@@ -40,23 +41,71 @@ def _command(line: str) -> str:
     return line.lower().strip(string.punctuation + string.whitespace)
 
 
+def _format_trace(name, arguments, result) -> str:
+    """One readable record of a tool call and what the robot returned (the state),
+    for the console printout and the chat log."""
+    arg = arguments.get("destination", arguments) if isinstance(arguments, dict) else arguments
+    head = f"[tool] {name}({arg!r})"
+    if "error" in result and "reached" not in result:  # rejected before running
+        return f"{head} -> error: {result['error']}"
+    parts = [f"reached={result.get('reached')}"]
+    if "steps" in result:
+        parts.append(f"steps={result['steps']}")
+    if "error" in result:
+        parts.append(f"error={result['error']!r}")
+    line = f"{head} -> " + " ".join(parts)
+    state = result.get("state")
+    if state:
+        line += "\n        state: " + " ".join(f"{k}={v}" for k, v in state.items())
+    return line
+
+
+class Transcript:
+    """Appends timestamped lines to a chat-log file (line-buffered so it can be
+    tailed live). Captures the whole session -- utterances, replies, tool calls,
+    state -- on disk so it can be reviewed after the fact."""
+
+    def __init__(self, path):
+        self.path = path
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        self._f = open(path, "a", buffering=1)
+
+    def write(self, line):
+        stamp = datetime.now().strftime("%H:%M:%S")
+        for sub in str(line).splitlines() or [""]:
+            self._f.write(f"[{stamp}] {sub}\n")
+
+    def close(self):
+        self._f.close()
+
+
 class ChatSession:
     """Drives a conversation: read an utterance, run it through the agent, speak
     the reply. `read()` returns the next utterance (or None to end the session);
     `speak(text)` emits a reply. Both are injectable for tests and for audio."""
 
-    def __init__(self, agent, nav, read=_terminal_read, speak=print, seed=0):
+    def __init__(self, agent, nav, read=_terminal_read, speak=print, seed=0,
+                 log=None):
         self.agent = agent
         self.nav = nav
         self.read = read
         self.speak = speak
         self.seed = seed
+        # log(line) records the transcript (utterances + replies + markers); the
+        # agent's trace logs tool calls into the same sink for in-order history.
+        self.log = log or (lambda line: None)
         self._scene = 0  # bumped each reset so every fresh scene is distinct
+
+    def _say(self, text):
+        """Speak a reply AND record it in the transcript."""
+        self.speak(text)
+        self.log(f"ROBOT: {text}")
 
     def start(self):
         self.nav.reset(seed=self.seed)
-        self.speak("Ready. What would you like me to do? "
-                   "(say 'reset' for a fresh scene, 'goodbye' to stop)")
+        self.log("=== session start ===")
+        self._say("Ready. What would you like me to do? "
+                  "(say 'reset' for a fresh scene, 'goodbye' to stop)")
         got_input = False
         while True:
             line = self.read()
@@ -79,14 +128,18 @@ class ChatSession:
             if cmd in RESET_WORDS:
                 self._reset()
                 continue
-            self.speak(self.agent.handle_utterance(line))
-        self.speak("Goodbye.")
+            self.log(f"YOU: {line}")
+            self._say(self.agent.handle_utterance(line))
+        self._say("Goodbye.")
+        self.log("=== session end ===")
 
     def _reset(self):
         self._scene += 1
-        self.nav.reset(seed=self.seed + self._scene)  # new world scene
-        self.agent.reset()                            # clear the conversation
-        self.speak("Fresh scene. What would you like me to do?")
+        seed = self.seed + self._scene
+        self.nav.reset(seed=seed)   # new world scene
+        self.agent.reset()          # clear the conversation
+        self.log(f"=== reset: new scene (seed {seed}) ===")
+        self._say("Fresh scene. What would you like me to do?")
 
 
 def main():
@@ -96,15 +149,30 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--render-mode", default="human", choices=["human", "rgb_array"],
                    help="human opens a window so you can watch the robot drive")
+    p.add_argument("--log-dir", default="logs", help="where to write the chat log")
     args = p.parse_args()
 
     from planner.navigator_tool import NavigatorTool
     from planner.llm_client import LLMClient
     from planner.agent_loop import PlannerAgent
 
+    log_path = os.path.join(args.log_dir,
+                            f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    transcript = Transcript(log_path)
+    print(f"(logging this session to {log_path})")
+
+    def trace(name, arguments, result):
+        line = _format_trace(name, arguments, result)
+        print(line)             # console printout (so you see tool calls + state)
+        transcript.write(line)  # and the chat log
+
     nav = NavigatorTool(render_mode=args.render_mode)
-    agent = PlannerAgent(LLMClient(base_url=args.base_url, model=args.model), nav)
-    ChatSession(agent, nav, seed=args.seed).start()
+    agent = PlannerAgent(LLMClient(base_url=args.base_url, model=args.model), nav,
+                         trace=trace)
+    try:
+        ChatSession(agent, nav, seed=args.seed, log=transcript.write).start()
+    finally:
+        transcript.close()
 
 
 if __name__ == "__main__":

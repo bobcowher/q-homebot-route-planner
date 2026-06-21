@@ -1,4 +1,4 @@
-from planner.chat import ChatSession
+from planner.chat import ChatSession, Transcript, _format_trace
 
 
 class MockAgent:
@@ -90,6 +90,40 @@ def test_no_dead_stdin_hint_after_normal_use(capsys):
     s, agent, nav, spoken = _session(["do a thing", "quit"])
     s.start()
     assert "--no-capture-output" not in capsys.readouterr().err
+
+
+def test_format_trace_shows_tool_call_and_state():
+    line = _format_trace("go_to", {"destination": "trash"},
+                         {"reached": True, "steps": 87,
+                          "state": {"carrying": None, "trash_remaining": 1}})
+    assert "go_to" in line and "trash" in line
+    assert "reached" in line and "87" in line
+    assert "trash_remaining=1" in line
+
+
+def test_format_trace_handles_error_result():
+    line = _format_trace("go_to", {"destination": "bogus"},
+                         {"reached": False, "error": "unknown destination",
+                          "state": {}})
+    assert "go_to" in line and "error" in line.lower()
+
+
+def test_session_logs_utterances_and_replies_in_order():
+    logged = []
+    s, agent, nav, spoken = _session(["get a drink", "quit"], log=logged.append)
+    s.start()
+    assert any("YOU: get a drink" in line for line in logged)
+    assert any("ROBOT: ok" in line for line in logged)
+
+
+def test_transcript_appends_lines_to_file(tmp_path):
+    p = tmp_path / "chat.log"
+    t = Transcript(str(p))
+    t.write("YOU: hi")
+    t.write("ROBOT: hello")
+    t.close()
+    text = p.read_text()
+    assert "YOU: hi" in text and "ROBOT: hello" in text
 
 
 def test_blank_lines_are_skipped():

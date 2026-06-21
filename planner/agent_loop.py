@@ -10,11 +10,14 @@ MAX_TOOL_CALLS = 12
 
 class PlannerAgent:
     def __init__(self, client, navigator, system_prompt=SYSTEM_PROMPT,
-                 max_tool_calls=MAX_TOOL_CALLS):
+                 max_tool_calls=MAX_TOOL_CALLS, trace=None):
         self.client = client
         self.nav = navigator
         self.max_tool_calls = max_tool_calls
         self.system_prompt = system_prompt
+        # trace(name, arguments, result) fires after each tool call, for
+        # observability (console printout + chat log). None = silent.
+        self.trace = trace
         self.conversation: list[dict] = [
             {"role": "system", "content": system_prompt}]
 
@@ -43,6 +46,8 @@ class PlannerAgent:
             })
             for tc in resp["tool_calls"]:
                 result = self._dispatch(tc)
+                if self.trace:
+                    self.trace(tc["name"], tc.get("arguments") or {}, result)
                 self.conversation.append({
                     "role": "tool", "tool_call_id": tc["id"],
                     "content": json.dumps(result)})

@@ -79,6 +79,17 @@ def test_missing_destination_does_not_crash_loop():
     assert out == "Sorry, I got confused."
 
 
+def test_trace_hook_fires_per_tool_call_with_name_args_result():
+    llm = MockLLM([_tool("fridge"), _tool("human"), _say("done")])
+    nav = MockNav()
+    events = []
+    agent = PlannerAgent(llm, nav, trace=lambda n, a, r: events.append((n, a, r)))
+    agent.handle_utterance("bring me a drink")
+    assert [n for n, _, _ in events] == ["go_to", "go_to"]
+    assert events[0][1] == {"destination": "fridge"}
+    assert "reached" in events[0][2]  # the result dict (state) is passed through
+
+
 def test_tool_call_budget_stops_infinite_loops():
     llm = MockLLM([_tool("fridge")] * 50)  # never says a final message
     nav = MockNav()
