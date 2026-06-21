@@ -222,16 +222,11 @@ class Agent:
         print(f"  New best checkpoint saved (episode={episode}, chain_score={chain_score:.2f})")
 
     def greedy_eval(self, n_episodes: int = 20) -> float:
-        """Greedy eval mirroring her/evaluate.py (full episode, reward>0.5), so
-        numbers are comparable to the proven baseline. Rung 1 keeps the random
-        spawn (the only difference from Rung 0's eval).
-
-        self.last_avg_success_steps tracks steps on successful episodes — the
-        circling diagnostic.
-        """
+        """Greedy single-goal eval mirroring evaluate.py (full episode, reward>0.5),
+        so numbers are comparable to the proven baseline. Random spawn each episode.
+        Returns the reach rate; chain_eval is the deployment metric."""
         self.q_model.eval()
         successes = 0
-        success_steps = []
 
         for _ in range(n_episodes):
             raw_obs, _   = self.env.reset()
@@ -244,7 +239,6 @@ class Agent:
 
             done = False
             ep_reward = 0.0
-            steps = 0
             while not done:
                 goal_vec = world_coords(r.x, r.y,
                                         desired_goal[0], desired_goal[1])
@@ -256,63 +250,13 @@ class Agent:
                 raw_next, reward, term, trunc, _ = self.env.step(action)
                 obs = self.process_observation(raw_next["observation"])
                 ep_reward += float(reward)
-                steps += 1
                 done = term or trunc
 
             if ep_reward > 0.5:
                 successes += 1
-                success_steps.append(steps)
 
         self.q_model.train()
-        self.last_avg_success_steps = (
-            sum(success_steps) / len(success_steps) if success_steps else 0.0
-        )
         return successes / n_episodes
-
-    def softmax_eval(self, n_episodes: int = 20, temp: float = 0.1):
-        """Same as greedy_eval but samples a ~ softmax(Q(s,.)/temp) instead of
-        argmax. Tests whether stochastic action selection breaks the limit cycles
-        that pin greedy reach far below training reward (the 0.9-train/0.25-greedy
-        gap). Returns (reach_rate, avg_success_steps)."""
-        self.q_model.eval()
-        successes = 0
-        success_steps = []
-
-        for _ in range(n_episodes):
-            raw_obs, _   = self.env.reset()
-            obs          = self.process_observation(raw_obs["observation"])
-            desired_goal = raw_obs["desired_goal"]
-            base         = self.env.unwrapped
-            r            = base._robot
-            desired_goal = self._reset_goal(base, desired_goal)
-            ms           = MotionState(self.n_actions, self.motion_window)
-
-            done = False
-            ep_reward = 0.0
-            steps = 0
-            while not done:
-                goal_vec = world_coords(r.x, r.y,
-                                        desired_goal[0], desired_goal[1])
-                motion = ms.vec(r.x, r.y)
-                with torch.no_grad():
-                    q      = self._q_forward(self.q_model, obs, goal_vec, motion).squeeze(0)
-                    probs  = F.softmax(q / temp, dim=0)
-                    action = int(torch.multinomial(probs, 1).item())
-                ms.commit(r.x, r.y, action)
-
-                raw_next, reward, term, trunc, _ = self.env.step(action)
-                obs = self.process_observation(raw_next["observation"])
-                ep_reward += float(reward)
-                steps += 1
-                done = term or trunc
-
-            if ep_reward > 0.5:
-                successes += 1
-                success_steps.append(steps)
-
-        self.q_model.train()
-        avg_steps = sum(success_steps) / len(success_steps) if success_steps else 0.0
-        return successes / n_episodes, avg_steps
 
     def chain_eval(self, n_episodes: int = 5):
         """The real deployment metric: run the static task chain in the non-goal
@@ -457,31 +401,18 @@ class Agent:
             writer.add_scalar("Train/epsilon",         self.epsilon,   episode)
             writer.add_scalar("Train/avg_q_loss",      avg_loss,       episode)
             writer.add_scalar("Train/episode_steps",   episode_steps,  episode)
-            writer.add_scalar("Train/total_grad_steps", self.total_steps,     episode)
             writer.add_scalar("Train/total_env_steps",  self.total_env_steps, episode)
-            writer.add_scalar("Train/updates_per_env_step", self.updates_per_step, episode)
             writer.add_scalar("Buffer/fill", min(self.memory.mem_ctr, self.memory.mem_size), episode)
 
             if episode % 10 == 0:
                 self.save()
 
-            # Honest greedy eval — the real metric for the ablation ladder.
+            # Honest greedy eval — single-goal nav health (the chain eval below is
+            # the deployment metric). Directness now lives in chain_spin_fraction.
             if episode % eval_interval == 0:
                 reach_rate = self.greedy_eval(n_episodes=eval_episodes)
                 writer.add_scalar("Eval/greedy_reach_rate", reach_rate, episode)
-                writer.add_scalar("Eval/avg_success_steps",
-                                  getattr(self, "last_avg_success_steps", 0.0), episode)
-                print(f"  [Eval] episode {episode}: greedy reach_rate={reach_rate:.3f} "
-                      f"| avg_success_steps={getattr(self, 'last_avg_success_steps', 0.0):.0f}")
-
-                # Softmax (Boltzmann) eval readout: does sampling break the greedy
-                # limit cycles and close the train/greedy gap? Sweep two temps.
-                for temp in (0.01, 0.025, 0.05):
-                    sm_reach, sm_steps = self.softmax_eval(n_episodes=eval_episodes, temp=temp)
-                    writer.add_scalar(f"Eval/softmax_reach_rate_t{temp}", sm_reach, episode)
-                    writer.add_scalar(f"Eval/softmax_avg_success_steps_t{temp}", sm_steps, episode)
-                    print(f"  [Eval] episode {episode}: softmax(t={temp}) "
-                          f"reach_rate={sm_reach:.3f} | avg_success_steps={sm_steps:.0f}")
+                print(f"  [Eval] episode {episode}: greedy reach_rate={reach_rate:.3f}")
 
             # Chained task score — the real deployment metric, logged often, and
             # the criterion for the "best" checkpoint (greedy reach_rate selected
