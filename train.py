@@ -14,17 +14,19 @@ env = gym.make(
     random_start=True,   # env owns spawn now (uniform valid tile, >=60px from goals)
 )
 
-# CURRICULUM + MOTION A/B arm vs run 305 (curriculum, no motion). Same locked
-# curriculum as 303/305 (K=2 bootstrap 600, anneal 2->0 to ep1800, 200k buffer),
-# but motion ON. Motion-input was a wash when tested ALONE (runs 299/301) — but
-# that was under the old diet where broken routing capped the score and masked
-# any anti-loop benefit. The curriculum cracked routing (fridge/door 0->70%+);
-# the residual failure is the greedy action loop, which is exactly what motion
-# targets. This is the fair re-test: does [last action | velocity] sand down the
-# residual loops on top of the curriculum? Kill-or-cure for motion.
-# Watch Eval/chain_score vs 305, and Eval/avg_success_steps (loop/directness).
+# WINDOWED MOTION vs champion 314 (depth-4 + velocity-only motion). 314 still
+# spins (greedy 11.4% / softmax_rel 5.7% spin fraction, scripts/spin_metric.py).
+# Diagnosis: one-step velocity only exposes the STATIONARY freak-out (velocity~0).
+# A *moving* limit cycle has full per-step velocity, so it looks like healthy
+# motion — invisible to [last action | velocity]. motion_window=8 adds the net
+# displacement over the last 8 poses (matches the spin-metric horizon): during a
+# cycle the windowed net collapses to ~0 while velocity stays large, a distinct
+# input the net can finally condition on to break the loop. Realism-clean: it's
+# odometry over a window, not a reward/ground-truth hack.
+# Judge: honest chain (bar 4.50/55%, chained_eval.py) + spin_metric (beat 5.7%
+# deployed / 11.4% greedy), both run with --motion-window 8.
 agent = Agent(env=env, max_buffer_size=200000, goal_layers=2, head_layers=4,
-              use_motion=True, random_goal_tiles=True)
+              use_motion=True, motion_window=8, random_goal_tiles=True)
 
 agent.train(episodes=1800, batch_size=64, eval_interval=50, eval_episodes=20,
             chain_eval_interval=10, her_anneal_start=600)

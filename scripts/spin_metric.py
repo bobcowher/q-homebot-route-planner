@@ -84,7 +84,7 @@ def _run(model, env, base, readout, temp, episodes, seed, window, move_min, net_
     for ep in range(episodes):
         obs = process_observation(env.reset(seed=seed + ep)[0])
         r = base._robot
-        ms = MotionState(env.action_space.n)
+        ms = MotionState(env.action_space.n, getattr(model, "motion_window", 1))
         targets = [(name, resolve_goal(base, name)) for name in DEFAULT_CHAIN]
         for name, (gx, gy) in targets:
             start = (r.x, r.y)
@@ -130,6 +130,9 @@ def main():
     p.add_argument("--head-layers", type=int, default=4)
     p.add_argument("--head-norm", action="store_true")
     p.add_argument("--use-motion", action="store_true")
+    p.add_argument("--motion-window", type=int, default=1,
+                   help="windowed net-displacement horizon the checkpoint was "
+                        "trained with (1 = original velocity-only motion)")
     p.add_argument("--episodes", type=int, default=20)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--readouts", nargs="+", default=["greedy", "softmax_rel"],
@@ -152,7 +155,8 @@ def main():
     base = env.unwrapped
     model = load_q_model(args.checkpoint, env.action_space.n, device,
                          goal_layers=args.goal_layers, head_layers=args.head_layers,
-                         head_norm=args.head_norm, use_motion=args.use_motion)
+                         head_norm=args.head_norm, use_motion=args.use_motion,
+                         motion_window=args.motion_window)
 
     print(f"checkpoint: {args.checkpoint} | window={args.window} "
           f"move_min={move_min:.1f}px net_max={net_max:.1f}px")

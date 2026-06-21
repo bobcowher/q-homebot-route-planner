@@ -39,14 +39,14 @@ def make_env():
 
 
 def load_q_model(path, n_actions, device, goal_layers=1, head_layers=1, head_norm=False,
-                 use_motion=False):
+                 use_motion=False, motion_window=1):
     state = torch.load(path, map_location=device)
     if "q_model" in state:  # best.pt wraps the state_dict with metadata
         print(f"  ({path} is a best-checkpoint from episode {state.get('episode')})")
         state = state["q_model"]
     model = QModel(action_dim=n_actions, goal_layers=goal_layers,
                    head_layers=head_layers, head_norm=head_norm,
-                   use_motion=use_motion).to(device)
+                   use_motion=use_motion, motion_window=motion_window).to(device)
     model.load_state_dict(state)
     model.eval()
     return model
@@ -62,12 +62,13 @@ def evaluate(model, env, episodes, device, epsilon=0.0):
     success_steps = []
 
     use_motion = getattr(model, "use_motion", False)
+    motion_window = getattr(model, "motion_window", 1)
     for episode in range(episodes):
         raw_obs, _ = env.reset()
         obs = process_observation(raw_obs["observation"])
         desired_goal = raw_obs["desired_goal"]
         pos = raw_obs["achieved_goal"]
-        ms = MotionState(env.action_space.n)  # type: ignore[attr-defined]
+        ms = MotionState(env.action_space.n, motion_window)  # type: ignore[attr-defined]
 
         done = False
         steps = 0
@@ -125,6 +126,9 @@ def main():
     parser.add_argument("--head-layers", type=int, default=1)
     parser.add_argument("--head-norm", action="store_true")
     parser.add_argument("--use-motion", action="store_true")
+    parser.add_argument("--motion-window", type=int, default=1,
+                        help="windowed net-displacement horizon the checkpoint was "
+                             "trained with (1 = original velocity-only motion)")
     args = parser.parse_args()
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -136,7 +140,8 @@ def main():
         print(f"\n=== {path} | {args.episodes} episodes | epsilon={args.epsilon} ===")
         model = load_q_model(path, n_actions, device,
                              goal_layers=args.goal_layers, head_layers=args.head_layers,
-                             head_norm=args.head_norm, use_motion=args.use_motion)
+                             head_norm=args.head_norm, use_motion=args.use_motion,
+                             motion_window=args.motion_window)
         results[path] = evaluate(model, env, args.episodes, device, args.epsilon)
 
     print("\n=== Summary ===")

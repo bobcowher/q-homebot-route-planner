@@ -111,7 +111,7 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0):
     raw_obs, _ = env.reset(seed=seed)
     obs = process_observation(raw_obs)
     robot = base._robot
-    ms = MotionState(env.action_space.n)  # motion persists across legs
+    ms = MotionState(env.action_space.n, getattr(model, "motion_window", 1))  # motion persists across legs
 
     # Resolve every leg's target coordinate up front (the static orchestrated list
     # is coords fixed at plan time). Must happen before stepping: the robot picks
@@ -181,6 +181,9 @@ def main():
                         help="checkpoint was trained with LayerNorm head")
     parser.add_argument("--use-motion", action="store_true",
                         help="checkpoint was trained with the motion input")
+    parser.add_argument("--motion-window", type=int, default=1,
+                        help="windowed net-displacement horizon the checkpoint was "
+                             "trained with (1 = original velocity-only motion)")
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--temp", type=float, default=0.01,
                         help="softmax temperature for the softmax readout")
@@ -210,7 +213,8 @@ def main():
     n_actions = env.action_space.n  # type: ignore[union-attr]
     model = load_q_model(args.checkpoint, n_actions, device,
                          goal_layers=args.goal_layers, head_layers=args.head_layers,
-                         head_norm=args.head_norm, use_motion=args.use_motion)
+                         head_norm=args.head_norm, use_motion=args.use_motion,
+                         motion_window=args.motion_window)
 
     print(f"\nchain: {args.chain}")
     print(f"checkpoint: {args.checkpoint} (goal_layers={args.goal_layers}, "

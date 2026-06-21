@@ -9,10 +9,13 @@ class QModel(BaseModel):
                  goal_scale=(864.0, 576.0, 864.0, 576.0),
                  goal_hidden=128, fc_hidden=512,
                  goal_layers=1, head_layers=1, head_norm=False,
-                 use_motion=False, motion_in_dim=None, motion_hidden=32):
+                 use_motion=False, motion_in_dim=None, motion_hidden=32,
+                 motion_window=1):
         super(QModel, self).__init__()
         self.head_norm = head_norm
         self.use_motion = use_motion
+        # Stored so eval can rebuild the matching MotionState off the checkpoint.
+        self.motion_window = motion_window
 
         # Coordinate reframing: goals arrive as absolute coords
         # [robot_x, robot_y, goal_x, goal_y] in raw map pixels (default map
@@ -42,7 +45,9 @@ class QModel(BaseModel):
         self.motion_encoder = None
         motion_feat = 0
         if use_motion:
-            motion_in_dim = motion_in_dim if motion_in_dim is not None else action_dim + 2
+            if motion_in_dim is None:
+                from motion import motion_dim
+                motion_in_dim = motion_dim(action_dim, motion_window)
             self.motion_encoder = nn.Linear(motion_in_dim, motion_hidden)
             motion_feat = motion_hidden
 

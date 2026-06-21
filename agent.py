@@ -10,7 +10,7 @@ import datetime
 from buffer import ReplayBuffer
 from episode_buffer import EpisodeBuffer
 from goal_geometry import world_coords
-from motion import MotionState, make_motion, motion_dim
+from motion import MotionState, motion_dim
 from models.q_model import QModel
 from task_chain import DEFAULT_CHAIN
 from chained_eval import run_chain
@@ -26,6 +26,7 @@ class Agent:
                        head_layers: int = 1,
                        head_norm: bool = False,
                        use_motion: bool = False,
+                       motion_window: int = 1,
                        random_goal_tiles: bool = False,
                        soft_q: bool = False,
                        soft_alpha: float = 0.01) -> None:
@@ -57,8 +58,11 @@ class Agent:
 
         # Previous-motion input (anti-oscillation): last action + velocity, so the
         # net can tell "approaching" from "stuck/reversing" (position alone can't).
+        # motion_window>1 adds a windowed net-displacement term so the *moving*
+        # limit cycle (spinning) becomes observable, not just the stationary stick.
         self.use_motion = use_motion
-        self.motion_dim = motion_dim(self.n_actions) if use_motion else 0
+        self.motion_window = motion_window
+        self.motion_dim = motion_dim(self.n_actions, motion_window) if use_motion else 0
 
         self.memory = ReplayBuffer(
             max_size=max_buffer_size,
@@ -78,6 +82,7 @@ class Agent:
             head_norm=head_norm,
             use_motion=use_motion,
             motion_in_dim=self.motion_dim or None,
+            motion_window=motion_window,
         ).to(self.device)
 
         self.target_q_model = QModel(
@@ -89,6 +94,7 @@ class Agent:
             head_norm=head_norm,
             use_motion=use_motion,
             motion_in_dim=self.motion_dim or None,
+            motion_window=motion_window,
         ).to(self.device)
         self.target_q_model.load_state_dict(self.q_model.state_dict())
 
@@ -234,7 +240,7 @@ class Agent:
             base         = self.env.unwrapped
             r            = base._robot
             desired_goal = self._reset_goal(base, desired_goal)
-            ms           = MotionState(self.n_actions)
+            ms           = MotionState(self.n_actions, self.motion_window)
 
             done = False
             ep_reward = 0.0
@@ -279,7 +285,7 @@ class Agent:
             base         = self.env.unwrapped
             r            = base._robot
             desired_goal = self._reset_goal(base, desired_goal)
-            ms           = MotionState(self.n_actions)
+            ms           = MotionState(self.n_actions, self.motion_window)
 
             done = False
             ep_reward = 0.0
@@ -367,7 +373,7 @@ class Agent:
             base         = self.env.unwrapped
             r            = base._robot
             desired_goal = self._reset_goal(base, desired_goal)
-            ms           = MotionState(self.n_actions)
+            ms           = MotionState(self.n_actions, self.motion_window)
 
             done = False
             episode_reward = 0.0
@@ -387,8 +393,10 @@ class Agent:
                 next_obs     = self.process_observation(raw_next["observation"])
                 heading_next = r.angle
                 pos_next     = np.array([r.x, r.y], dtype=np.float32)
-                motion_next  = make_motion(self.n_actions, action,
-                                           pos_next[0] - pos_prev[0], pos_next[1] - pos_prev[1])
+                # motion at s' == velocity into s' + windowed net from history;
+                # ms.vec at the new pose reproduces it (history already holds the
+                # pose we just committed), so the windowed term comes for free.
+                motion_next  = ms.vec(pos_next[0], pos_next[1])
                 done = term or trunc
 
                 # Store term (not trunc): a timeout is not a terminal state, so the
