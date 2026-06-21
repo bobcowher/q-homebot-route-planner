@@ -28,7 +28,7 @@ from homebot.goals import GOAL_NAMES, GOAL_THRESHOLD
 from evaluate import load_q_model, process_observation
 from goal_geometry import world_coords, distance, eval_step_budget
 from motion import MotionState
-from task_chain import DEFAULT_CHAIN, resolve_goal
+from task_chain import DEFAULT_CHAIN, resolve_goal, world_state, leg_succeeded
 
 VALID_NAMES = set(GOAL_NAMES) | {"go_to_human"}
 
@@ -37,8 +37,17 @@ VALID_NAMES = set(GOAL_NAMES) | {"go_to_human"}
 # 2+ tiles short (outside the hallway). Matches the env's tightened package-pickup
 # radius: robot.RADIUS(15) + tile_size(32) * _DOOR_RANGE(1.0) = 47px. Solid
 # fixtures (fridge/recliner) keep GOAL_THRESHOLD — the robot can't stand on them.
+# Per-target STOPPING radius: match the env's own interaction radius so the robot
+# is driven close enough for the env interaction (pickup/collect) to actually
+# fire. robot.RADIUS(15) + tile_size(32) * RANGE:
+#   door  package pickup  _DOOR_RANGE 1.0 -> 47px
+#   trash floor collect   _TRASH_RANGE 0.5 -> 31px   (default 79px stopped 1.5
+#         tiles short, so trash was never collected -- see leg_succeeded)
+# Fixtures (fridge/recliner) interact at _FIXTURE_RANGE 2.0 = 79px = GOAL_THRESHOLD,
+# so they need no override.
 DOOR_REACH = 47.0
-REACH_OVERRIDE = {"go_to_door": DOOR_REACH}
+TRASH_REACH = 31.0
+REACH_OVERRIDE = {"go_to_door": DOOR_REACH, "collect_trash": TRASH_REACH}
 
 
 def _select_action(model, obs, goal_xy, robot, device, readout, temp, motion):
@@ -114,8 +123,12 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0):
     for name, (gx, gy) in targets:
         budget = max(1, int(eval_step_budget(distance(robot.x, robot.y, gx, gy)) * budget_mult))
         reach = REACH_OVERRIDE.get(name, GOAL_THRESHOLD)
-        reached, steps, obs = run_leg(model, env, base, obs, (gx, gy),
+        before = world_state(base)
+        arrived, steps, obs = run_leg(model, env, base, obs, (gx, gy),
                                       budget, device, readout, temp, ms, reach)
+        # Honest score: the leg counts only if the TASK actually happened (state
+        # delta), not merely that the robot got near the coordinate.
+        reached = leg_succeeded(name, before, world_state(base), arrived)
         results.append((name, reached, steps))
     return results
 

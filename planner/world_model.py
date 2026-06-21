@@ -4,7 +4,7 @@ The seam where real perception drops in later: today it reads the known map and
 TaskManager state; tomorrow a VLM populates the same interface. The planner only
 ever sees friendly destination names + task state, never pixels.
 """
-from task_chain import resolve_goal
+from task_chain import resolve_goal, world_state
 
 # Friendly destination name -> env goal-registry name.
 DEST_TO_ENV = {
@@ -28,15 +28,7 @@ class WorldModel:
         return dests
 
     def state(self) -> dict:
-        base = self.base
-        info = base._task_manager.get_info(base._robot)
-        return {
-            "carrying": base._robot.carrying,
-            "trash_remaining": info["trash_remaining"],
-            "drink_delivered": info["drink_delivered"],
-            "package_delivered": info["package_delivered"],
-            "robot_xy": (float(base._robot.x), float(base._robot.y)),
-        }
+        return world_state(self.base)
 
     def resolve(self, name: str) -> tuple[float, float]:
         """Friendly name -> pixel (x, y). Raises KeyError on an unknown name;

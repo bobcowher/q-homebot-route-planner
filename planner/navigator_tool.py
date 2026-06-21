@@ -10,6 +10,7 @@ from evaluate import load_q_model, process_observation
 from goal_geometry import distance, eval_step_budget
 from motion import MotionState
 from chained_eval import run_leg, REACH_OVERRIDE
+from task_chain import leg_succeeded
 from planner.world_model import WorldModel, DEST_TO_ENV
 
 
@@ -53,10 +54,15 @@ class NavigatorTool:
             return {"reached": False, "error": str(e), "state": self.world.state()}
         env_name = DEST_TO_ENV[destination]
         reach = REACH_OVERRIDE.get(env_name, GOAL_THRESHOLD)
+        before = self.world.state()
         r = self.base._robot
         budget = max(1, int(eval_step_budget(distance(r.x, r.y, gx, gy))))
-        reached, steps, self.obs = run_leg(
+        arrived, steps, self.obs = run_leg(
             self.model, self.env, self.base, self.obs, (gx, gy),
             budget, self.device, self.readout, self.temp, self.ms, reach)
-        return {"reached": bool(reached), "steps": int(steps),
-                "state": self.world.state()}
+        after = self.world.state()
+        # "reached" = the task actually completed (state delta), not just that the
+        # robot got near the coordinate. "arrived" exposes the raw proximity too.
+        reached = leg_succeeded(env_name, before, after, arrived)
+        return {"reached": bool(reached), "arrived": bool(arrived),
+                "steps": int(steps), "state": after}

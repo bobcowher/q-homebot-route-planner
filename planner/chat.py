@@ -49,6 +49,8 @@ def _format_trace(name, arguments, result) -> str:
     if "error" in result and "reached" not in result:  # rejected before running
         return f"{head} -> error: {result['error']}"
     parts = [f"reached={result.get('reached')}"]
+    if "arrived" in result and result["arrived"] != result.get("reached"):
+        parts.append(f"arrived={result['arrived']}")  # got near but task not done
     if "steps" in result:
         parts.append(f"steps={result['steps']}")
     if "error" in result:
