@@ -14,8 +14,14 @@ class PlannerAgent:
         self.client = client
         self.nav = navigator
         self.max_tool_calls = max_tool_calls
+        self.system_prompt = system_prompt
         self.conversation: list[dict] = [
             {"role": "system", "content": system_prompt}]
+
+    def reset(self) -> None:
+        """Clear the conversation back to the system prompt (new chat session).
+        Pairs with NavigatorTool.reset(), which starts a fresh world episode."""
+        self.conversation = [{"role": "system", "content": self.system_prompt}]
 
     def handle_utterance(self, text: str) -> str:
         self.conversation.append({"role": "user", "content": text})
