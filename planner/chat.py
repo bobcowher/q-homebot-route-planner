@@ -10,6 +10,7 @@ get audio with no change to the loop or the planner.
 """
 import argparse
 import os
+import string
 import sys
 
 # Allow direct-script invocation: put the repo root on the path so the absolute
@@ -25,8 +26,16 @@ def _terminal_read(prompt="you> "):
         return None
 
 
-QUIT_WORDS = {"quit", "exit"}
-RESET_WORDS = {"reset"}
+# Natural farewells end the session, not just "exit" -- this is how people (and,
+# soon, ASR) actually close a conversation.
+QUIT_WORDS = {"quit", "exit", "bye", "goodbye", "goodnight", "good night"}
+RESET_WORDS = {"reset", "new scene", "start over"}
+
+
+def _command(line: str) -> str:
+    """Normalize a line for command matching: lowercase, strip surrounding
+    punctuation/whitespace. So 'Goodbye.', 'bye!', 'GOOD NIGHT.' all match."""
+    return line.lower().strip(string.punctuation + string.whitespace)
 
 
 class ChatSession:
@@ -45,7 +54,7 @@ class ChatSession:
     def start(self):
         self.nav.reset(seed=self.seed)
         self.speak("Ready. What would you like me to do? "
-                   "(say 'reset' for a fresh scene, 'quit' to stop)")
+                   "(say 'reset' for a fresh scene, 'goodbye' to stop)")
         while True:
             line = self.read()
             if line is None:           # end of stream (EOF / closed audio)
@@ -53,10 +62,10 @@ class ChatSession:
             line = line.strip()
             if not line:
                 continue
-            low = line.lower()
-            if low in QUIT_WORDS:
+            cmd = _command(line)
+            if cmd in QUIT_WORDS:
                 break
-            if low in RESET_WORDS:
+            if cmd in RESET_WORDS:
                 self._reset()
                 continue
             self.speak(self.agent.handle_utterance(line))

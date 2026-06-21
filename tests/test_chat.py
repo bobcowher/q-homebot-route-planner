@@ -61,6 +61,15 @@ def test_quit_ends_the_loop():
     assert agent.utterances == ["hello"]  # nothing after quit
 
 
+def test_natural_farewells_end_the_loop_despite_case_and_punctuation():
+    # People (and ASR) end conversations with "Goodbye.", "bye!", "Goodnight" --
+    # not "exit". These must end the session, not get sent to the LLM.
+    for farewell in ["Goodbye.", "bye!", "Goodnight", "GOOD NIGHT.", "  bye  "]:
+        s, agent, nav, spoken = _session([farewell, "should not run"])
+        s.start()
+        assert agent.utterances == [], f"{farewell!r} leaked to the agent"
+
+
 def test_end_of_stream_ends_the_loop():
     # read() returning None (EOF / closed audio stream) ends the session cleanly.
     s, agent, nav, spoken = _session(["hello"])
