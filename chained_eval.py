@@ -28,6 +28,7 @@ from homebot.goals import GOAL_NAMES, GOAL_THRESHOLD
 from evaluate import load_q_model, process_observation
 from goal_geometry import world_coords, distance, eval_step_budget
 from motion import MotionState
+from policy import softmax_rel_probs
 from task_chain import DEFAULT_CHAIN, resolve_goal, world_state, leg_succeeded
 
 VALID_NAMES = set(GOAL_NAMES) | {"go_to_human"}
@@ -66,13 +67,11 @@ def _select_action(model, obs, goal_xy, robot, device, readout, temp, motion):
             probs = F.softmax(q / temp, dim=0)
             return int(torch.multinomial(probs, 1).item())
         if readout == "softmax_rel":
-            # Scale-invariant: temperature relative to the per-state Q spread, so
-            # `temp` is a unitless fraction that transfers across checkpoints. A
-            # near-tie (tiny std) -> ~uniform (explore the tie); a confident state
-            # (large std) -> sharp (exploit). Breaks limit cycles without a
-            # Q-magnitude-specific magic number.
-            scale = temp * (q.std() + 1e-8)
-            probs = F.softmax(q / scale, dim=0)
+            # Scale-invariant softmax (shared with the training rollout policy in
+            # agent.select_action, so train==deploy). temp is a unitless fraction of
+            # the per-state Q spread; breaks limit cycles without a magnitude magic
+            # number. See policy.softmax_rel_probs.
+            probs = softmax_rel_probs(q, temp)
             return int(torch.multinomial(probs, 1).item())
         return int(q.argmax().item())
 

@@ -12,6 +12,7 @@ from episode_buffer import EpisodeBuffer
 from goal_geometry import world_coords, spin_fraction, spin_thresholds, SPIN_WINDOW
 from motion import MotionState, motion_dim
 from models.q_model import QModel
+from policy import softmax_rel_probs
 from task_chain import DEFAULT_CHAIN
 from chained_eval import run_chain
 from torch.utils.tensorboard.writer import SummaryWriter
@@ -29,7 +30,9 @@ class Agent:
                        motion_window: int = 1,
                        random_goal_tiles: bool = False,
                        soft_q: bool = False,
-                       soft_alpha: float = 0.01) -> None:
+                       soft_alpha: float = 0.01,
+                       softmax_behavior: bool = False,
+                       softmax_behavior_temp: float = 0.1) -> None:
         self.env = env
         # Soft-Q (entropy-regularized) value backup + softmax behavior policy.
         # Hard-Q greedy is a deterministic map over a deterministic env, so it can
@@ -39,6 +42,17 @@ class Agent:
         # Eval a soft-Q model with softmax at temp=alpha (matched by construction).
         self.soft_q = soft_q
         self.soft_alpha = soft_alpha
+        # Hard-Q behavior policy = softmax_rel (the deploy readout), NOT argmax.
+        # The greedy map over a deterministic env settles into limit cycles, and
+        # the cure that works at deploy is softmax_rel sampling (scale-invariant
+        # temperature). But the champion trains epsilon-greedy and only deploys
+        # softmax_rel, so the Q-function never collected data under the policy we
+        # ship. This collects the exploit steps under that same distribution to
+        # close the train/deploy mismatch. Unlike soft_q this does NOT touch the
+        # Bellman target (no entropy term, no value flattening) — it only changes
+        # action selection during rollout.
+        self.softmax_behavior = softmax_behavior
+        self.softmax_behavior_temp = softmax_behavior_temp
         # When True, each episode's goal is a uniformly-sampled valid floor tile
         # (whole-map coverage) instead of the env's trash/fixture goal — trains a
         # navigator that reaches arbitrary commanded coords, not just trash spots.
@@ -165,7 +179,16 @@ class Agent:
         if random.random() < self.epsilon:
             return self.env.action_space.sample()
         with torch.no_grad():
-            return self._q_forward(self.q_model, obs, goal, motion).argmax(dim=1).item()
+            q = self._q_forward(self.q_model, obs, goal, motion).squeeze(0)
+            if self.softmax_behavior:
+                # softmax_rel: scale-invariant temperature = temp * per-state Q
+                # spread, identical to evaluate/spin_metric/chained_eval. Trains
+                # the exploit steps under the deployed policy. epsilon is kept for
+                # early uniform coverage (decays 1.0 -> 0.1); softmax_rel alone
+                # would sharpen on noise when Q is still flat.
+                probs = softmax_rel_probs(q, self.softmax_behavior_temp)
+                return int(torch.multinomial(probs, 1).item())
+            return int(q.argmax().item())
 
     def train_step(self, batch_size):
         (obs, actions, rewards, next_obs, dones, goals, next_goals,
