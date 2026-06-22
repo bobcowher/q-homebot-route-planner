@@ -39,29 +39,60 @@ def _d(a, b):
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
+def _add_noise(obs, std):
+    """Per-step Gaussian pixel noise (0-255 scale) on the obs the POLICY sees --
+    sensor noise / flickering lighting. Breaks input determinism so a greedy
+    policy can't settle into an EXACT limit cycle. Does NOT touch the env state
+    or the true robot pose (motion is built from r.x/r.y), only the image input."""
+    if std <= 0:
+        return obs
+    f = obs.float()
+    return (f + torch.randn_like(f) * std).clamp(0, 255)
+
+
 # spin_fraction now lives in goal_geometry (shared with the in-train chain eval);
 # re-exported above so callers and the test keep importing it from here.
 
 
-def leg_positions(model, env, base, obs, goal_xy, budget, device, readout, temp, ms, reach):
+def leg_positions(model, env, base, obs, goal_xy, budget, device, readout, temp, ms, reach,
+                  input_noise=0.0, repeat_k=1, repeat_near_goal=True):
     """Drive one leg; return (reached, positions, obs). positions is the per-step
-    (x, y) trace used for the spin computation."""
+    (x, y) trace used for the spin computation.
+
+    repeat_k>1 commits each chosen action for up to k env steps before re-deciding
+    (open-loop macro / action repeat) -- the cheap test of "commitment breaks the
+    near-goal dither". repeat_near_goal=False forces single-step re-decision within
+    one reach radius of the goal, so a committed macro can't overshoot the stopping
+    point (where the vibration actually lives)."""
     robot = base._robot
     positions = [(robot.x, robot.y)]
     reached = False
-    for _ in range(budget):
+    steps = 0
+    while steps < budget:
         motion = ms.vec(robot.x, robot.y)
-        action = _select_action(model, obs, goal_xy, robot, device, readout, temp, motion)
-        ms.commit(robot.x, robot.y, action)
-        obs = process_observation(env.step(action)[0])
-        positions.append((robot.x, robot.y))
-        if distance(robot.x, robot.y, goal_xy[0], goal_xy[1]) <= reach:
-            reached = True
+        action = _select_action(model, _add_noise(obs, input_noise), goal_xy,
+                                robot, device, readout, temp, motion)
+        k = repeat_k
+        if not repeat_near_goal and \
+                distance(robot.x, robot.y, goal_xy[0], goal_xy[1]) <= reach:
+            k = 1  # near-goal guard: single-step on terminal approach
+        for _ in range(k):
+            ms.commit(robot.x, robot.y, action)
+            obs = process_observation(env.step(action)[0])
+            positions.append((robot.x, robot.y))
+            steps += 1
+            if distance(robot.x, robot.y, goal_xy[0], goal_xy[1]) <= reach:
+                reached = True
+                break
+            if steps >= budget:
+                break
+        if reached:
             break
     return reached, positions, obs
 
 
-def _run(model, env, base, readout, temp, episodes, seed, window, move_min, net_max):
+def _run(model, env, base, readout, temp, episodes, seed, window, move_min, net_max,
+         input_noise=0.0, repeat_k=1, repeat_near_goal=True):
     legs = []  # (name, reached, spin_frac, path, straight)
     for ep in range(episodes):
         obs = process_observation(env.reset(seed=seed + ep)[0])
@@ -74,7 +105,8 @@ def _run(model, env, base, readout, temp, episodes, seed, window, move_min, net_
             reach = REACH_OVERRIDE.get(name, GOAL_THRESHOLD)
             reached, pos, obs = leg_positions(model, env, base, obs, (gx, gy),
                                               budget, "cuda:0" if torch.cuda.is_available()
-                                              else "cpu", readout, temp, ms, reach)
+                                              else "cpu", readout, temp, ms, reach,
+                                              input_noise, repeat_k, repeat_near_goal)
             sf = spin_fraction(pos, window, move_min, net_max)
             path = sum(_d(pos[i - 1], pos[i]) for i in range(1, len(pos)))
             straight = _d(start, pos[-1])
@@ -102,7 +134,29 @@ def _report(readout, legs, spin_leg_thresh):
           f"{(100 * len(reached_spun) / len(reached)) if reached else 0:.0f}%  "
           f"(spun, then broke out)")
     print(f"  path inflation:            {inflation:.2f}x straight-line")
+    _per_leg(legs, spin_leg_thresh)
     return mean_sf
+
+
+def _per_leg(legs, spin_leg_thresh):
+    """Spin/reach/inflation broken out by leg name -- isolates WHICH leg carries
+    the residual (we expect collect_trash, the tight reach)."""
+    names = []
+    for l in legs:
+        if l[0] not in names:
+            names.append(l[0])
+    print("  per-leg:")
+    for name in names:
+        ls = [l for l in legs if l[0] == name]
+        n = len(ls)
+        msf = sum(l[2] for l in ls) / n
+        reached = sum(1 for l in ls if l[1])
+        spun = sum(1 for l in ls if l[2] >= spin_leg_thresh)
+        tp = sum(l[3] for l in ls)
+        ts = sum(l[4] for l in ls)
+        infl = (tp / ts) if ts else float("nan")
+        print(f"    {name:<16} spin {100 * msf:4.1f}%  "
+              f"spun {spun}/{n}  reached {reached}/{n}  infl {infl:.2f}x")
 
 
 def main():
@@ -124,6 +178,16 @@ def main():
                    help="trailing steps over which to judge net progress")
     p.add_argument("--spin-leg-thresh", type=float, default=0.1,
                    help="a leg 'spun' if this fraction of its steps were spinning")
+    p.add_argument("--input-noise", type=float, default=0.0,
+                   help="per-step Gaussian pixel noise std (0-255 scale) on the obs "
+                        "the policy sees; breaks input determinism (0 = off)")
+    p.add_argument("--repeat-k", type=int, default=1,
+                   help="commit each chosen action for up to k env steps before "
+                        "re-deciding (open-loop macro / action repeat; 1 = off)")
+    p.add_argument("--no-repeat-near-goal", dest="repeat_near_goal",
+                   action="store_false", default=True,
+                   help="force single-step re-decision within one reach radius of "
+                        "the goal (protect the terminal approach from overshoot)")
     args = p.parse_args()
 
     # Thresholds in ROBOT_STEP_PX units so they track the env step size.
@@ -141,11 +205,14 @@ def main():
                          motion_window=args.motion_window)
 
     print(f"checkpoint: {args.checkpoint} | window={args.window} "
-          f"move_min={move_min:.1f}px net_max={net_max:.1f}px")
+          f"move_min={move_min:.1f}px net_max={net_max:.1f}px | "
+          f"input_noise={args.input_noise:.0f} | repeat_k={args.repeat_k} "
+          f"repeat_near_goal={args.repeat_near_goal}")
     summary = {}
     for readout in args.readouts:
         legs = _run(model, env, base, readout, args.temp, args.episodes, args.seed,
-                    args.window, move_min, net_max)
+                    args.window, move_min, net_max, args.input_noise,
+                    args.repeat_k, args.repeat_near_goal)
         summary[readout] = _report(readout, legs, args.spin_leg_thresh)
 
     print(f"\n=== spin summary (mean spin fraction) ===")
