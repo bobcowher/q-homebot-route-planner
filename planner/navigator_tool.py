@@ -57,7 +57,9 @@ class NavigatorTool:
         before = self.world.state()
         r = self.base._robot
         budget = max(1, int(eval_step_budget(distance(r.x, r.y, gx, gy))))
-        arrived, steps, self.obs = run_leg(
+        # run_leg returns (reached, steps, obs, positions); the positions trace is
+        # only for the spin metric, so discard it here.
+        arrived, steps, self.obs, _ = run_leg(
             self.model, self.env, self.base, self.obs, (gx, gy),
             budget, self.device, self.readout, self.temp, self.ms, reach)
         after = self.world.state()
