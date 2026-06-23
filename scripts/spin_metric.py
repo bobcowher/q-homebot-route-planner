@@ -56,7 +56,7 @@ def _add_noise(obs, std):
 
 
 def leg_positions(model, env, base, obs, goal_xy, budget, device, readout, temp, ms, reach,
-                  input_noise=0.0, repeat_k=1, repeat_near_goal=True):
+                  input_noise=0.0, repeat_k=1, repeat_near_goal=True, macro_near_radius=0.0):
     """Drive one leg; return (reached, positions, obs). positions is the per-step
     (x, y) trace used for the spin computation.
 
@@ -64,7 +64,13 @@ def leg_positions(model, env, base, obs, goal_xy, budget, device, readout, temp,
     (open-loop macro / action repeat) -- the cheap test of "commitment breaks the
     near-goal dither". repeat_near_goal=False forces single-step re-decision within
     one reach radius of the goal, so a committed macro can't overshoot the stopping
-    point (where the vibration actually lives)."""
+    point (where the vibration actually lives).
+
+    macro_near_radius>0: for a MACRO model (macro_h>1), execute only the FIRST decoded
+    action (re-plan every step) when within macro_near_radius px of the goal, instead
+    of committing the whole sequence. This is the deploy-side test of the overshoot
+    theory -- if collect_trash reach jumps with this on, the 3-step commitment was
+    overshooting the tight reach; if it doesn't move, overshoot wasn't the cause."""
     robot = base._robot
     positions = [(robot.x, robot.y)]
     macro_h = getattr(model, "macro_h", 1)
@@ -75,7 +81,11 @@ def leg_positions(model, env, base, obs, goal_xy, budget, device, readout, temp,
         motion = ms.vec(robot.x, robot.y)
         idx = _select_action(model, _add_noise(obs, input_noise), goal_xy,
                              robot, device, readout, temp, motion)
-        for action in decode_macro(idx, macro_h, n_base):
+        macro_actions = decode_macro(idx, macro_h, n_base)
+        if macro_near_radius > 0 and \
+                distance(robot.x, robot.y, goal_xy[0], goal_xy[1]) <= macro_near_radius:
+            macro_actions = macro_actions[:1]  # single-step re-plan near goal (anti-overshoot)
+        for action in macro_actions:
             k = repeat_k
             if not repeat_near_goal and \
                     distance(robot.x, robot.y, goal_xy[0], goal_xy[1]) <= reach:
@@ -98,7 +108,7 @@ def leg_positions(model, env, base, obs, goal_xy, budget, device, readout, temp,
 
 
 def _run(model, env, base, readout, temp, episodes, seed, window, move_min, net_max,
-         input_noise=0.0, repeat_k=1, repeat_near_goal=True):
+         input_noise=0.0, repeat_k=1, repeat_near_goal=True, macro_near_radius=0.0):
     legs = []  # (name, reached, spin_frac, path, straight)
     for ep in range(episodes):
         obs = process_observation(env.reset(seed=seed + ep)[0])
@@ -112,7 +122,8 @@ def _run(model, env, base, readout, temp, episodes, seed, window, move_min, net_
             reached, pos, obs = leg_positions(model, env, base, obs, (gx, gy),
                                               budget, "cuda:0" if torch.cuda.is_available()
                                               else "cpu", readout, temp, ms, reach,
-                                              input_noise, repeat_k, repeat_near_goal)
+                                              input_noise, repeat_k, repeat_near_goal,
+                                              macro_near_radius)
             sf = spin_fraction(pos, window, move_min, net_max)
             path = sum(_d(pos[i - 1], pos[i]) for i in range(1, len(pos)))
             straight = _d(start, pos[-1])
@@ -194,6 +205,11 @@ def main():
                    action="store_false", default=True,
                    help="force single-step re-decision within one reach radius of "
                         "the goal (protect the terminal approach from overshoot)")
+    p.add_argument("--macro-near-radius", type=float, default=0.0,
+                   help="MACRO models only: within this px of the goal, execute just "
+                        "the first decoded action (re-plan each step) instead of the "
+                        "whole sequence -- the deploy-side test of the overshoot "
+                        "theory (0 = off, always commit the full macro)")
     args = p.parse_args()
 
     # Thresholds in ROBOT_STEP_PX units so they track the env step size.
@@ -213,12 +229,13 @@ def main():
     print(f"checkpoint: {args.checkpoint} | window={args.window} "
           f"move_min={move_min:.1f}px net_max={net_max:.1f}px | "
           f"input_noise={args.input_noise:.0f} | repeat_k={args.repeat_k} "
-          f"repeat_near_goal={args.repeat_near_goal}")
+          f"repeat_near_goal={args.repeat_near_goal} | "
+          f"macro_near_radius={args.macro_near_radius:.0f}")
     summary = {}
     for readout in args.readouts:
         legs = _run(model, env, base, readout, args.temp, args.episodes, args.seed,
                     args.window, move_min, net_max, args.input_noise,
-                    args.repeat_k, args.repeat_near_goal)
+                    args.repeat_k, args.repeat_near_goal, args.macro_near_radius)
         summary[readout] = _report(readout, legs, args.spin_leg_thresh)
 
     print(f"\n=== spin summary (mean spin fraction) ===")
