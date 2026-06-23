@@ -2,6 +2,7 @@
 NavigatorTool (loads the run314 champion), reset a scene, and drive go_to on each
 destination. Confirms the model loads, run_leg's 4-tuple unpack works, and legs run
 without crashing -- the plumbing chat.py drives, minus the qwen/ollama layer."""
+import argparse
 import sys
 from pathlib import Path
 
@@ -11,7 +12,13 @@ from planner.navigator_tool import NavigatorTool
 
 
 def main():
-    nav = NavigatorTool(render_mode="rgb_array")  # headless
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--checkpoint", default="checkpoints/run314_q_model_best.pt")
+    ap.add_argument("--head-norm", action="store_true")
+    ap.add_argument("--readout", default="softmax_rel")
+    a = ap.parse_args()
+    nav = NavigatorTool(checkpoint=a.checkpoint, readout=a.readout,
+                        render_mode="rgb_array", head_norm=a.head_norm)  # headless
     nav.reset(seed=0)
     for dest in ["fridge", "human", "door"]:
         r = nav.go_to(dest)

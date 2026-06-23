@@ -17,11 +17,15 @@ from planner.world_model import WorldModel, DEST_TO_ENV
 class NavigatorTool:
     def __init__(self, checkpoint="checkpoints/run314_q_model_best.pt",
                  readout="softmax_rel", temp=0.1, device=None,
-                 render_mode="rgb_array"):
+                 render_mode="rgb_array", head_norm=False):
         # render_mode="human" opens a window and auto-shows every step (the env's
         # _get_obs draws to the window in human mode) -- used by the chat REPL so
         # you can watch the robot drive. Default "rgb_array" stays headless for
         # eval/smoke/tests.
+        # head_norm=True is required for LayerNorm checkpoints (the macro-action runs);
+        # macro_h is auto-detected from the checkpoint meta by load_q_model, and
+        # run_leg decodes/executes the macro -- so pointing checkpoint at a macro model
+        # (+head_norm) drives multi-step rollouts with no other change.
         self.device = device or ("cuda:0" if torch.cuda.is_available() else "cpu")
         self.env = gym.make(
             "HomeBot2D-V1", render_mode=render_mode, action_mode="discrete",
@@ -31,7 +35,7 @@ class NavigatorTool:
         self.world = WorldModel(self.env)
         self.model = load_q_model(
             checkpoint, self.env.action_space.n, self.device,
-            goal_layers=2, head_layers=4, use_motion=True)
+            goal_layers=2, head_layers=4, use_motion=True, head_norm=head_norm)
         self.readout, self.temp = readout, temp
         self.obs = None
         self.ms = None
