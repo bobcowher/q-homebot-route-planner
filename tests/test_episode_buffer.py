@@ -5,6 +5,7 @@ import torch
 import numpy as np
 from episode_buffer import EpisodeBuffer
 from buffer import ReplayBuffer
+from goal_geometry import world_coords
 
 
 def _make_replay():
@@ -13,6 +14,7 @@ def _make_replay():
         input_shape=(3, 96, 96),
         input_device='cpu',
         output_device='cpu',
+        goal_dim=4,
     )
 
 
@@ -62,9 +64,8 @@ def test_send_to_clears_nothing_on_its_own():
     assert len(ep) == 1, "send_to must not clear the buffer — caller does that"
 
 
-def test_relative_goal_vectors():
-    """Stored goals must be relative: desired - achieved_prev for Q(s, g) and
-    desired - achieved_next for the bootstrap target Q(s', g)."""
+def test_absolute_goal_vectors():
+    """Stored goals must be absolute coords: [robot_x, robot_y, goal_x, goal_y] via world_coords."""
     ep  = EpisodeBuffer()
     rep = _make_replay()
     obs = torch.zeros(3, 96, 96, dtype=torch.uint8)
@@ -76,19 +77,19 @@ def test_relative_goal_vectors():
 
     # Pass 1 originals are the first n stored transitions.
     for i in range(n):
-        expected_goal      = desired - _pos(i * 10, i * 10)
-        expected_next_goal = desired - _pos((i + 1) * 10, (i + 1) * 10)
+        achieved_p = _pos(i * 10, i * 10)
+        achieved_n = _pos((i + 1) * 10, (i + 1) * 10)
+        expected_goal      = world_coords(achieved_p[0], achieved_p[1], desired[0], desired[1])
+        expected_next_goal = world_coords(achieved_n[0], achieved_n[1], desired[0], desired[1])
         assert torch.equal(rep.goal_memory[i], torch.as_tensor(expected_goal)), \
-            f"transition {i}: goal must be desired - achieved_prev"
+            f"transition {i}: goal must be world_coords at achieved_prev"
         assert torch.equal(rep.next_goal_memory[i], torch.as_tensor(expected_next_goal)), \
-            f"transition {i}: next_goal must be desired - achieved_next"
+            f"transition {i}: next_goal must be world_coords at achieved_next"
 
 
-def test_hindsight_relative_goal_vectors():
+def test_hindsight_absolute_goal_vectors():
     """Hindsight goals are future achieved_next positions; stored vectors must
-    be relative to this transition's prev/next positions. With K >= future
-    length on a 2-step episode, step 0's only hindsight goal is step 1's
-    achieved_next."""
+    be absolute coords relative to this transition's prev/next positions."""
     ep  = EpisodeBuffer()
     rep = _make_replay()
     obs = torch.zeros(3, 96, 96, dtype=torch.uint8)
@@ -99,8 +100,10 @@ def test_hindsight_relative_goal_vectors():
     # Layout: 2 originals, then step 0's hindsight (step 1 has no future).
     hg = _pos(20, 20)  # step 1's achieved_next
     assert rep.mem_ctr == 3
-    assert torch.equal(rep.goal_memory[2], torch.as_tensor(hg - _pos(0, 0)))
-    assert torch.equal(rep.next_goal_memory[2], torch.as_tensor(hg - _pos(10, 10)))
+    expected_goal      = world_coords(0, 0, hg[0], hg[1])
+    expected_next_goal = world_coords(10, 10, hg[0], hg[1])
+    assert torch.equal(rep.goal_memory[2], torch.as_tensor(expected_goal))
+    assert torch.equal(rep.next_goal_memory[2], torch.as_tensor(expected_next_goal))
 
 
 def test_hindsight_success_is_terminal():
