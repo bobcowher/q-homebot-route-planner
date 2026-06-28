@@ -39,7 +39,8 @@ def make_env():
 
 
 def load_q_model(path, n_actions, device, goal_layers=1, head_layers=1, head_norm=False,
-                 use_motion=False, motion_window=1, macro_h=1):
+                 use_motion=False, motion_window=1, macro_h=1,
+                 use_projection=True, motion_mlp=True):
     """n_actions is the BASE action count. For a macro checkpoint (macro_h>1) the
     output head is n_actions ** macro_h; macro_h is read from the checkpoint meta when
     present so callers need not know it. The returned model carries macro_h / n_base
@@ -52,10 +53,41 @@ def load_q_model(path, n_actions, device, goal_layers=1, head_layers=1, head_nor
         print(f"  ({path} is a best-checkpoint from episode {state.get('episode')})")
         macro_h = int(state.get("macro_h", macro_h))
         state = state["q_model"]
+        
+    # Assertions to ensure the checkpoint matches our expected architecture
+    checkpoint_has_projection = "conv_projection.weight" in state
+    assert checkpoint_has_projection == use_projection, \
+        f"Checkpoint projection mismatch: expected use_projection={use_projection}, but checkpoint has projection={checkpoint_has_projection}"
+        
+    checkpoint_has_motion = any(k.startswith("motion_encoder") for k in state.keys())
+    assert checkpoint_has_motion == use_motion, \
+        f"Checkpoint motion mismatch: expected use_motion={use_motion}, but checkpoint has motion={checkpoint_has_motion}"
+        
+    if use_motion:
+        checkpoint_has_mlp = "motion_encoder.0.weight" in state
+        assert checkpoint_has_mlp == motion_mlp, \
+            f"Checkpoint motion MLP mismatch: expected motion_mlp={motion_mlp}, but checkpoint has MLP={checkpoint_has_mlp}"
+            
+        weight_key = "motion_encoder.0.weight" if motion_mlp else "motion_encoder.weight"
+        checkpoint_motion_dim = state[weight_key].shape[1]
+        from motion import motion_dim
+        expected_motion_dim = motion_dim(n_actions, motion_window)
+        assert checkpoint_motion_dim == expected_motion_dim, \
+            f"Checkpoint motion dimension mismatch: expected {expected_motion_dim} (window={motion_window}), but checkpoint has {checkpoint_motion_dim}"
+
+    checkpoint_goal_layers = sum(1 for k in state.keys() if k.startswith("goal_encoder.") and k.endswith(".weight"))
+    assert checkpoint_goal_layers == goal_layers, \
+        f"Checkpoint goal layers mismatch: expected {goal_layers}, but checkpoint has {checkpoint_goal_layers}"
+        
+    checkpoint_head_layers = sum(1 for k in state.keys() if k.startswith("head.") and k.endswith(".weight"))
+    assert checkpoint_head_layers == head_layers, \
+        f"Checkpoint head layers mismatch: expected {head_layers}, but checkpoint has {checkpoint_head_layers}"
+
     model = QModel(action_dim=n_actions ** macro_h, goal_layers=goal_layers,
                    head_layers=head_layers, head_norm=head_norm,
                    use_motion=use_motion, motion_window=motion_window,
-                   macro_h=macro_h, n_base=n_actions).to(device)
+                   macro_h=macro_h, n_base=n_actions,
+                   use_projection=use_projection, motion_mlp=motion_mlp).to(device)
     model.load_state_dict(state)
     model.eval()
     return model

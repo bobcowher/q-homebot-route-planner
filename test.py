@@ -14,7 +14,9 @@ def main():
     parser.add_argument("--head-layers", type=int, default=4)
     parser.add_argument("--use-motion", action="store_true", default=True,
                         help="whether the model uses motion features")
-    parser.add_argument("--motion-window", type=int, default=1)
+    parser.add_argument("--motion-window", type=int, default=8)
+    parser.add_argument("--use-projection", action="store_true", default=True)
+    parser.add_argument("--motion-mlp", action="store_true", default=True)
     parser.add_argument("--episodes", type=int, default=3)
     parser.add_argument("--readout", default="greedy", choices=["greedy", "softmax", "softmax_rel"])
     parser.add_argument("--temp", type=float, default=0.01)
@@ -45,6 +47,8 @@ def main():
         head_layers=args.head_layers,
         use_motion=args.use_motion,
         motion_window=args.motion_window,
+        use_projection=args.use_projection,
+        motion_mlp=args.motion_mlp,
     )
 
     print(f"Loaded model from {args.checkpoint}")
