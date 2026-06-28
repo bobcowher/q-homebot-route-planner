@@ -9,7 +9,7 @@ class QModel(BaseModel):
                  goal_scale=(864.0, 576.0, 864.0, 576.0),
                  goal_hidden=128, fc_hidden=512,
                  goal_layers=1, head_layers=1, head_norm=False,
-                 use_motion=False, motion_in_dim=None, motion_hidden=32,
+                 use_motion=False, motion_in_dim=None, motion_hidden=64,
                  motion_window=1, macro_h=1, n_base=None):
         super(QModel, self).__init__()
         self.head_norm = head_norm
@@ -46,6 +46,9 @@ class QModel(BaseModel):
             in_dim = goal_hidden
         self.goal_encoder = nn.ModuleList(g_layers)
 
+        # Conv projection (bottleneck to prevent image features from washing out others)
+        self.conv_projection = nn.Linear(flat_size, 256)
+
         # Previous-motion encoder (anti-oscillation): its own small projection of
         # [one-hot(last_action) | velocity], fused into the head alongside the goal.
         self.motion_encoder = None
@@ -55,12 +58,16 @@ class QModel(BaseModel):
                 from motion import motion_dim
                 # motion one-hot is over BASE actions, not macros.
                 motion_in_dim = motion_dim(self.n_base, motion_window)
-            self.motion_encoder = nn.Linear(motion_in_dim, motion_hidden)
+            self.motion_encoder = nn.Sequential(
+                nn.Linear(motion_in_dim, motion_hidden),
+                nn.ReLU(),
+                nn.Linear(motion_hidden, motion_hidden)
+            )
             motion_feat = motion_hidden
 
         # Head: head_layers hidden layers (ReLU after each), then output. This is
         # the compositional reasoning block — the depth lever for the coord rep.
-        h_layers, in_dim = [], flat_size + goal_hidden + motion_feat
+        h_layers, in_dim = [], 256 + goal_hidden + motion_feat
         for _ in range(head_layers):
             h_layers.append(nn.Linear(in_dim, fc_hidden))
             in_dim = fc_hidden
@@ -97,7 +104,7 @@ class QModel(BaseModel):
         return g
 
     def forward(self, obs, goal, motion=None):
-        x = self._conv_forward(obs)
+        x = F.relu(self.conv_projection(self._conv_forward(obs)))
         g = self.encode_goal(goal)
         parts = [x, g]
         if self.motion_encoder is not None:
