@@ -51,25 +51,43 @@ def spin_thresholds(window: int = SPIN_WINDOW):
 
 
 def spin_fraction(positions, window, move_min, net_max):
-    """Fraction of steps inside a 'moving but not progressing' window -- the
-    signature of a limit cycle. positions: list of (x, y) per step.
-
-    A step t (t >= window) spins when, over the trailing `window` steps, the path
-    walked is >= move_min (really moved, so not a wall-stick) yet the net
-    displacement from window-start is <= net_max (ended ~where it began). Returns
-    0.0 for traces shorter than the window."""
+    """Fraction of steps inside a 'moving but not progressing' loop.
+    A step t is flagged as spinning if the robot's current position is close
+    to any position visited in its recent history (excluding the immediate past),
+    while the path distance traveled to get there is significant.
+    """
     n = len(positions)
     if n <= window:
         return 0.0
+    
+    # We check a history window of up to 3x the base window (e.g. 24 steps for window=8)
+    max_history = 3 * window
+    min_history = max(3, window // 2)
+    
     spin = 0
     for t in range(window, n):
-        net = distance(positions[t - window][0], positions[t - window][1],
-                       positions[t][0], positions[t][1])
-        path = sum(distance(positions[i - 1][0], positions[i - 1][1],
-                            positions[i][0], positions[i][1])
-                   for i in range(t - window + 1, t + 1))
-        if path >= move_min and net <= net_max:
+        current_path = 0.0
+        is_spinning = False
+        start_idx = max(0, t - max_history)
+        end_idx = t - min_history
+        
+        # Walk backwards from t to calculate path distances and check positions
+        for i in range(t - 1, start_idx - 1, -1):
+            step_dist = distance(positions[i][0], positions[i][1],
+                                 positions[i + 1][0], positions[i + 1][1])
+            current_path += step_dist
+            
+            # If we are in the checkable history window
+            if i <= end_idx:
+                net = distance(positions[i][0], positions[i][1],
+                               positions[t][0], positions[t][1])
+                if current_path >= move_min and net <= net_max:
+                    is_spinning = True
+                    break
+                    
+        if is_spinning:
             spin += 1
+            
     return spin / (n - window)
 
 
