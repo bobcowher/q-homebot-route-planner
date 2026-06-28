@@ -33,8 +33,6 @@ class Transition:
     done:          bool
     achieved_prev: np.ndarray  # robot pixel (x, y) at obs (before the step)
     achieved_next: np.ndarray  # robot pixel (x, y) at next_obs (after the step)
-    heading_prev:  float       # robot.angle (radians) before the step
-    heading_next:  float       # robot.angle (radians) after the step
     motion_prev:   np.ndarray | None = None  # motion feature at s  (state-intrinsic)
     motion_next:   np.ndarray | None = None  # motion feature at s' (state-intrinsic)
 
@@ -45,8 +43,7 @@ class EpisodeBuffer:
     Coordinate reframing: the network consumes the goal as absolute coords
     [robot_x, robot_y, goal_x, goal_y]. The robot-pose half changes within a
     transition as the robot moves, so each transition stores robot position at
-    both s and s' (heading retained for compatibility but unused by the coord
-    rep). Rewards still computed from absolute positions.
+    both s and s'. Rewards computed from absolute positions.
     """
 
     K = 2  # hindsight goals per transition (future strategy)
@@ -56,7 +53,6 @@ class EpisodeBuffer:
 
     def store(self, obs, action, reward, next_obs, done,
               achieved_prev, achieved_next,
-              heading_prev: float = 0.0, heading_next: float = 0.0,
               motion_prev=None, motion_next=None):
         self._transitions.append(Transition(
             obs=obs,
@@ -66,8 +62,6 @@ class EpisodeBuffer:
             done=bool(done),
             achieved_prev=achieved_prev,
             achieved_next=achieved_next,
-            heading_prev=float(heading_prev),
-            heading_next=float(heading_next),
             motion_prev=motion_prev,
             motion_next=motion_next,
         ))

@@ -394,7 +394,6 @@ class Agent:
             episode_steps  = 0
 
             while not done:
-                heading_prev = r.angle
                 pos_prev     = np.array([r.x, r.y], dtype=np.float32)
                 goal_vec     = world_coords(r.x, r.y,
                                             desired_goal[0], desired_goal[1])
@@ -425,7 +424,6 @@ class Agent:
                     if term:
                         break
                 next_obs     = self.process_observation(raw_next["observation"])
-                heading_next = r.angle
                 motion_next  = ms.vec(pos_next[0], pos_next[1])
                 done = term or trunc
 
@@ -437,8 +435,6 @@ class Agent:
                     obs, macro, reward, next_obs, term,
                     achieved_prev=pos_prev,
                     achieved_next=pos_next,
-                    heading_prev=heading_prev,
-                    heading_next=heading_next,
                     motion_prev=motion_prev,
                     motion_next=motion_next,
                 )

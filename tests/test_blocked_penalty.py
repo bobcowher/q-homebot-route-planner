@@ -15,7 +15,6 @@ def _t(prev, nxt, reward=0.0, done=False):
         obs=None, action=0, reward=reward, next_obs=None, done=done,
         achieved_prev=np.array(prev, dtype=np.float32),
         achieved_next=np.array(nxt, dtype=np.float32),
-        heading_prev=0.0, heading_next=0.0,
     )
 
 

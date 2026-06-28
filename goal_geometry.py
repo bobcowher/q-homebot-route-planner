@@ -73,35 +73,6 @@ def spin_fraction(positions, window, move_min, net_max):
     return spin / (n - window)
 
 
-def ego_vector(rx: float, ry: float, rtheta: float, gx: float, gy: float) -> np.ndarray:
-    """Goal displacement expressed in the robot's egocentric frame.
-
-    Rung 2 variable. Takes the world displacement (gx-rx, gy-ry) and rotates it
-    by -rtheta into the robot frame: x = forward component, y = left component.
-    MAGNITUDE IS PRESERVED (this is a rotation) — range still leaks through, so
-    this isolates the allocentric->egocentric change from the range-stripping
-    that Rung 3 adds on top.
-    """
-    dx = gx - rx
-    dy = gy - ry
-    c, s = math.cos(rtheta), math.sin(rtheta)
-    x_ego = dx * c + dy * s
-    y_ego = -dx * s + dy * c
-    return np.array([x_ego, y_ego], dtype=np.float32)
-
-
-def world_vector(rx: float, ry: float, gx: float, gy: float) -> np.ndarray:
-    """Goal displacement in the WORLD frame (no heading rotation).
-
-    The discrete action space is 8 fixed compass directions (world-frame), and the
-    observation viewport is north-up (world-frame). ego_vector rotated the goal by
-    -heading into a frame matching neither — and heading isn't even an input — so
-    the net got a goal direction scrambled by an unobservable rotation. Returning
-    the raw world displacement puts goal, image, and actions all in one frame.
-    """
-    return np.array([gx - rx, gy - ry], dtype=np.float32)
-
-
 def world_coords(rx: float, ry: float, gx: float, gy: float) -> np.ndarray:
     """Goal as raw ABSOLUTE coordinates: [robot_x, robot_y, goal_x, goal_y].
 
