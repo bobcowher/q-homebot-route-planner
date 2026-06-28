@@ -15,7 +15,7 @@ from goal_geometry import world_coords
 # data (K=2 during bootstrap) would teach nothing about pinning. Assumes there is
 # no no-op action — every action is a real move, so 0 displacement == blocked.
 BLOCKED_EPS = 0.5        # px; below this the step made no progress (a true pin)
-BLOCKED_PENALTY = -0.01  # per-step reward added to a blocked move (tunable)
+BLOCKED_PENALTY = -0.10  # per-step reward added to a blocked move (tunable)
 
 
 def _blocked_penalty(t) -> float:
