@@ -1,21 +1,71 @@
-from agent import Agent
+import argparse
 import gymnasium as gym
-import homebot
+import torch
+import homebot  # noqa: F401
 
-env = gym.make(
-    "HomeBot2D-Goal-V1",
-    render_mode="human",
-    action_mode="discrete",
-    obs_resolution=(96, 96),
-    n_trash=2,
-    max_steps=1000,
-    map_name="default",
-    goals=["go_to_fridge", "deliver_drink", "go_to_door", "deliver_package", "collect_trash"],
-    evaluate=True,
-)
+from evaluate import load_q_model
+from chained_eval import run_chain, _print_readout
+from task_chain import DEFAULT_CHAIN
 
-agent = Agent(env=env)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint", default="checkpoints/q_model.pt")
+    parser.add_argument("--goal-layers", type=int, default=2)
+    parser.add_argument("--head-layers", type=int, default=4)
+    parser.add_argument("--use-motion", action="store_true", default=True,
+                        help="whether the model uses motion features")
+    parser.add_argument("--motion-window", type=int, default=1)
+    parser.add_argument("--episodes", type=int, default=3)
+    parser.add_argument("--readout", default="greedy", choices=["greedy", "softmax", "softmax_rel"])
+    parser.add_argument("--temp", type=float, default=0.01)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--render-mode", default="human")
+    args = parser.parse_args()
 
-agent.load()
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-agent.test(episodes=10)
+    # Create the non-goal environment with the specified rendering mode
+    env = gym.make(
+        "HomeBot2D-V1",
+        render_mode=args.render_mode,
+        action_mode="discrete",
+        obs_resolution=(96, 96),
+        n_trash=2,
+        max_steps=10000,  # High step limit, let the per-leg budget handle timeouts
+        map_name="default",
+        random_start=True,
+    )
+
+    n_actions = env.action_space.n
+    model = load_q_model(
+        args.checkpoint,
+        n_actions,
+        device,
+        goal_layers=args.goal_layers,
+        head_layers=args.head_layers,
+        use_motion=args.use_motion,
+        motion_window=args.motion_window,
+    )
+
+    print(f"Loaded model from {args.checkpoint}")
+    print(f"Running multi-step sequence: {DEFAULT_CHAIN}")
+
+    episodes_results = []
+    for i in range(args.episodes):
+        print(f"\n--- Starting Episode {i+1}/{args.episodes} ---")
+        results = run_chain(
+            model,
+            env,
+            DEFAULT_CHAIN,
+            device,
+            args.readout,
+            args.temp,
+            seed=args.seed + i,
+            verbose=True,
+        )
+        episodes_results.append(results)
+
+    _print_readout(args.readout, episodes_results, DEFAULT_CHAIN)
+
+if __name__ == "__main__":
+    main()

@@ -108,7 +108,7 @@ def run_leg(model, env, base, obs, goal_xy, budget, device, readout, temp, ms, r
     return False, steps, obs, positions
 
 
-def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0):
+def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0, verbose=False):
     """Reset once, walk the chain leg-by-leg. Pose persists across legs; a failed
     leg does NOT abort the chain (we continue so we can see where it breaks).
 
@@ -131,7 +131,9 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0):
     targets = [(name, resolve_goal(base, name)) for name in chain]
 
     results = []
-    for name, (gx, gy) in targets:
+    for i, (name, (gx, gy)) in enumerate(targets):
+        if verbose:
+            print(f"  Executing leg {i+1}/{len(targets)}: {name} ... ", end="", flush=True)
         budget = max(1, int(eval_step_budget(distance(robot.x, robot.y, gx, gy)) * budget_mult))
         reach = REACH_OVERRIDE.get(name, GOAL_THRESHOLD)
         before = world_state(base)
@@ -141,6 +143,9 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0):
         # delta), not merely that the robot got near the coordinate.
         reached = leg_succeeded(name, before, world_state(base), arrived)
         results.append((name, reached, steps, positions))
+        if verbose:
+            status = f"SUCCESS (steps={steps})" if reached else f"TIMEOUT (steps={steps})"
+            print(status)
     return results
 
 
