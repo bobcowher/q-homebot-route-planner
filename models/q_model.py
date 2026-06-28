@@ -10,7 +10,8 @@ class QModel(BaseModel):
                  goal_hidden=128, fc_hidden=512,
                  goal_layers=1, head_layers=1, head_norm=False,
                  use_motion=False, motion_in_dim=None, motion_hidden=64,
-                 motion_window=1, macro_h=1, n_base=None):
+                 motion_window=1, macro_h=1, n_base=None,
+                 use_projection=True, motion_mlp=True):
         super(QModel, self).__init__()
         self.head_norm = head_norm
         self.use_motion = use_motion
@@ -47,7 +48,11 @@ class QModel(BaseModel):
         self.goal_encoder = nn.ModuleList(g_layers)
 
         # Conv projection (bottleneck to prevent image features from washing out others)
-        self.conv_projection = nn.Linear(flat_size, 256)
+        self.conv_projection = None
+        flat_out = flat_size
+        if use_projection:
+            self.conv_projection = nn.Linear(flat_size, 256)
+            flat_out = 256
 
         # Previous-motion encoder (anti-oscillation): its own small projection of
         # [one-hot(last_action) | velocity], fused into the head alongside the goal.
@@ -58,16 +63,20 @@ class QModel(BaseModel):
                 from motion import motion_dim
                 # motion one-hot is over BASE actions, not macros.
                 motion_in_dim = motion_dim(self.n_base, motion_window)
-            self.motion_encoder = nn.Sequential(
-                nn.Linear(motion_in_dim, motion_hidden),
-                nn.ReLU(),
-                nn.Linear(motion_hidden, motion_hidden)
-            )
+            
+            if motion_mlp:
+                self.motion_encoder = nn.Sequential(
+                    nn.Linear(motion_in_dim, motion_hidden),
+                    nn.ReLU(),
+                    nn.Linear(motion_hidden, motion_hidden)
+                )
+            else:
+                self.motion_encoder = nn.Linear(motion_in_dim, motion_hidden)
             motion_feat = motion_hidden
 
         # Head: head_layers hidden layers (ReLU after each), then output. This is
         # the compositional reasoning block — the depth lever for the coord rep.
-        h_layers, in_dim = [], 256 + goal_hidden + motion_feat
+        h_layers, in_dim = [], flat_out + goal_hidden + motion_feat
         for _ in range(head_layers):
             h_layers.append(nn.Linear(in_dim, fc_hidden))
             in_dim = fc_hidden
@@ -83,7 +92,8 @@ class QModel(BaseModel):
 
         print(f"QModel: input={input_shape}, conv_flat={flat_size}, goal_dim={goal_dim}, "
               f"goal_layers={goal_layers}, head_layers={head_layers}, "
-              f"head_norm={head_norm}, actions={action_dim}")
+              f"head_norm={head_norm}, actions={action_dim}, "
+              f"use_projection={use_projection}, motion_mlp={motion_mlp}")
 
     def _conv_forward(self, x):
         x = F.relu(self.conv1(x))
@@ -104,12 +114,18 @@ class QModel(BaseModel):
         return g
 
     def forward(self, obs, goal, motion=None):
-        x = F.relu(self.conv_projection(self._conv_forward(obs)))
+        if self.conv_projection is not None:
+            x = F.relu(self.conv_projection(self._conv_forward(obs)))
+        else:
+            x = self._conv_forward(obs)
         g = self.encode_goal(goal)
         parts = [x, g]
         if self.motion_encoder is not None:
             assert motion is not None, "use_motion model called without a motion vector"
-            parts.append(F.relu(self.motion_encoder(motion)))
+            if isinstance(self.motion_encoder, nn.Sequential):
+                parts.append(F.relu(self.motion_encoder(motion)))
+            else:
+                parts.append(F.relu(self.motion_encoder(motion)))
         x = torch.cat(parts, dim=1)
         for i, layer in enumerate(self.head):
             x = layer(x)
