@@ -19,7 +19,7 @@ import homebot
 # Clean A/B vs 314 (4.30/38% chain, 5.8% deploy spin) on the collect_trash leg:
 # chained_eval.py + spin_metric. her_anneal_start=None keeps HER's dense relabel
 # grounding the whole run (the tight 31px target needs it).
-CARDINAL_ONLY = True  # Set to True to restrict action space to N, E, S, W (Up/Down/Left/Right)
+CARDINAL_ONLY = False  # Set to True to restrict action space to N, E, S, W (Up/Down/Left/Right)
 
 env = gym.make(
     "HomeBot2D-Goal-V1",
