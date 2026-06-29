@@ -133,7 +133,7 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0, v
     results = []
     for i, (name, (gx, gy)) in enumerate(targets):
         if verbose:
-            print(f"  Executing leg {i+1}/{len(targets)}: {name} ... ", end="", flush=True)
+            print(f"  Executing leg {i+1}/{len(targets)}: {name} ...")
         budget = max(1, int(eval_step_budget(distance(robot.x, robot.y, gx, gy)) * budget_mult))
         reach = REACH_OVERRIDE.get(name, GOAL_THRESHOLD)
         before = world_state(base)
@@ -145,7 +145,7 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0, v
         results.append((name, reached, steps, positions))
         if verbose:
             status = f"SUCCESS (steps={steps})" if reached else f"TIMEOUT (steps={steps})"
-            print(status)
+            print(f"  -> {status}")
     return results
 
 
