@@ -57,12 +57,12 @@ def main():
         motion_mlp=args.motion_mlp,
     )
 
-    print(f"Loaded model from {args.checkpoint}")
-    print(f"Running multi-step sequence: {DEFAULT_CHAIN}")
+    print(f"Loaded model from {args.checkpoint}", flush=True)
+    print(f"Running multi-step sequence: {DEFAULT_CHAIN}", flush=True)
 
     episodes_results = []
     for i in range(args.episodes):
-        print(f"\n--- Starting Episode {i+1}/{args.episodes} ---")
+        print(f"\n--- Starting Episode {i+1}/{args.episodes} ---", flush=True)
         results = run_chain(
             model,
             env,

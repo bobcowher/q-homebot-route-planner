@@ -133,7 +133,7 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0, v
     results = []
     for i, (name, (gx, gy)) in enumerate(targets):
         if verbose:
-            print(f"  Executing leg {i+1}/{len(targets)}: {name} ...")
+            print(f"  Executing leg {i+1}/{len(targets)}: {name} ...", flush=True)
         if name == "collect_trash":
             budget = 600
         else:
@@ -148,7 +148,7 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0, v
         results.append((name, reached, steps, positions))
         if verbose:
             status = f"SUCCESS (steps={steps})" if reached else f"TIMEOUT (steps={steps})"
-            print(f"  -> {status}")
+            print(f"  -> {status}", flush=True)
     return results
 
 
