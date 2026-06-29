@@ -23,6 +23,8 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--cardinal-only", action="store_true", default=False,
                         help="restrict the action space to 4 cardinal directions")
+    parser.add_argument("--frame-skip", type=int, default=1,
+                        help="number of frames to skip (action repeat)")
     parser.add_argument("--render-mode", default="human")
     args = parser.parse_args()
 
@@ -43,6 +45,10 @@ def main():
     if args.cardinal_only:
         from cardinal_wrapper import CardinalActionWrapper
         env = CardinalActionWrapper(env)
+
+    if args.frame_skip > 1:
+        from env_wrappers import FrameSkipWrapper
+        env = FrameSkipWrapper(env, skip=args.frame_skip)
 
     n_actions = env.action_space.n
     model = load_q_model(

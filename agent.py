@@ -74,6 +74,7 @@ class Agent:
         self.n_base = self.env.action_space.n  # type: ignore[union-attr]
         self.macro_h = macro_h
         self.n_actions = self.n_base ** macro_h
+        self.frame_skip = getattr(self.env, "_skip", 1)
 
         # Coordinate reframing: goal is [robot_x, robot_y, goal_x, goal_y].
         self.goal_dim = 4
@@ -322,6 +323,9 @@ class Agent:
             if self.n_actions == 4:
                 from cardinal_wrapper import CardinalActionWrapper
                 self._chain_env = CardinalActionWrapper(self._chain_env)
+            if self.frame_skip > 1:
+                from env_wrappers import FrameSkipWrapper
+                self._chain_env = FrameSkipWrapper(self._chain_env, skip=self.frame_skip)
         self.q_model.eval()
         n_legs = len(DEFAULT_CHAIN)
         # A soft-Q model is meant to be used stochastically; score it the way it

@@ -20,6 +20,7 @@ import homebot
 # chained_eval.py + spin_metric. her_anneal_start=None keeps HER's dense relabel
 # grounding the whole run (the tight 31px target needs it).
 CARDINAL_ONLY = False  # Set to True to restrict action space to N, E, S, W (Up/Down/Left/Right)
+FRAME_SKIP = 1         # Set to 2 for 2-step frameskip (action repeat)
 
 env = gym.make(
     "HomeBot2D-Goal-V1",
@@ -36,6 +37,10 @@ env = gym.make(
 if CARDINAL_ONLY:
     from cardinal_wrapper import CardinalActionWrapper
     env = CardinalActionWrapper(env)
+
+if FRAME_SKIP > 1:
+    from env_wrappers import FrameSkipWrapper
+    env = FrameSkipWrapper(env, skip=FRAME_SKIP)
 
 agent = Agent(env=env, max_buffer_size=200000, goal_layers=2, head_layers=4,
               use_motion=True, motion_window=8, random_goal_tiles=True)

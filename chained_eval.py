@@ -134,10 +134,11 @@ def run_chain(model, env, chain, device, readout, temp, seed, budget_mult=1.0, v
     for i, (name, (gx, gy)) in enumerate(targets):
         if verbose:
             print(f"  Executing leg {i+1}/{len(targets)}: {name} ...", flush=True)
+        skip = getattr(env, "_skip", 1)
         if name == "collect_trash":
-            budget = 600
+            budget = 600 // skip
         else:
-            budget = max(1, int(eval_step_budget(distance(robot.x, robot.y, gx, gy)) * budget_mult))
+            budget = max(1, int(eval_step_budget(distance(robot.x, robot.y, gx, gy)) * budget_mult)) // skip
         reach = REACH_OVERRIDE.get(name, GOAL_THRESHOLD)
         before = world_state(base)
         arrived, steps, obs, positions = run_leg(model, env, base, obs, (gx, gy),

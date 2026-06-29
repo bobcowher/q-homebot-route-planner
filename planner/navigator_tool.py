@@ -18,7 +18,7 @@ class NavigatorTool:
     def __init__(self, checkpoint="checkpoints/run325_q_model_best.pt",
                  readout="softmax_rel", temp=0.1, device=None,
                  render_mode="rgb_array", head_norm=False,
-                 cardinal_only=False):
+                 cardinal_only=False, frame_skip=1):
         # render_mode="human" opens a window and auto-shows every step (the env's
         # _get_obs draws to the window in human mode) -- used by the chat REPL so
         # you can watch the robot drive. Default "rgb_array" stays headless for
@@ -35,6 +35,9 @@ class NavigatorTool:
         if cardinal_only:
             from cardinal_wrapper import CardinalActionWrapper
             self.env = CardinalActionWrapper(self.env)
+        if frame_skip > 1:
+            from env_wrappers import FrameSkipWrapper
+            self.env = FrameSkipWrapper(self.env, skip=frame_skip)
         self.base = self.env.unwrapped
         self.world = WorldModel(self.env)
         self.model = load_q_model(
@@ -64,10 +67,11 @@ class NavigatorTool:
         reach = REACH_OVERRIDE.get(env_name, GOAL_THRESHOLD)
         before = self.world.state()
         r = self.base._robot
+        skip = getattr(self.env, "_skip", 1)
         if env_name == "collect_trash":
-            budget = 600
+            budget = 600 // skip
         else:
-            budget = max(1, int(eval_step_budget(distance(r.x, r.y, gx, gy))))
+            budget = max(1, int(eval_step_budget(distance(r.x, r.y, gx, gy)))) // skip
 
         # run_leg returns (reached, steps, obs, positions); the positions trace is
         # only for the spin metric, so discard it here.
