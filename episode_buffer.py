@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from typing import Callable
 import random
@@ -16,12 +17,34 @@ from goal_geometry import world_coords
 # no no-op action — every action is a real move, so 0 displacement == blocked.
 BLOCKED_EPS = 0.5        # px; below this the step made no progress (a true pin)
 BLOCKED_PENALTY = -0.10  # per-step reward added to a blocked move (tunable)
+SPIN_PENALTY = -0.05     # per-step reward added to a spinning/circling move (tunable)
 
 
 def _blocked_penalty(t) -> float:
     """BLOCKED_PENALTY if this transition was a full wall-pin, else 0.0."""
     moved = float(np.linalg.norm(t.achieved_next - t.achieved_prev))
     return BLOCKED_PENALTY if moved < BLOCKED_EPS else 0.0
+
+
+def _spin_penalty(t, step_idx, action_dim=8, window=8) -> float:
+    """SPIN_PENALTY if the robot is moving but has very low net displacement
+    over the window (a moving limit cycle / spin). Only applied if step_idx >= window
+    (history is full) and the transition is not already penalized as a blocked pin."""
+    if t.motion_prev is None or len(t.motion_prev) != action_dim + 4:
+        return 0.0
+    moved = float(np.linalg.norm(t.achieved_next - t.achieved_prev))
+    if moved < BLOCKED_EPS:
+        return 0.0  # already covered by blocked penalty
+    
+    # Net displacement is stored at the end of the motion vector, normalized.
+    # ndx is at action_dim + 2, ndy is at action_dim + 3.
+    ndx = t.motion_prev[action_dim + 2]
+    ndy = t.motion_prev[action_dim + 3]
+    net_disp = float(math.sqrt(ndx**2 + ndy**2))
+    
+    if step_idx >= window and net_disp < 0.25:
+        return SPIN_PENALTY
+    return 0.0
 
 
 @dataclass
@@ -94,13 +117,14 @@ class EpisodeBuffer:
         k = self.K if k is None else k
 
         # Pass 1: original transitions (env reward, episode desired_goal)
-        for t in self._transitions:
+        for i, t in enumerate(self._transitions):
             goal_at_s  = world_coords(t.achieved_prev[0], t.achieved_prev[1],
                                       dg[0], dg[1])
             goal_at_sp = world_coords(t.achieved_next[0], t.achieved_next[1],
                                       dg[0], dg[1])
+            r = t.reward + _blocked_penalty(t) + _spin_penalty(t, i)
             replay_buffer.store_transition(
-                t.obs, t.action, t.reward + _blocked_penalty(t), t.next_obs, t.done,
+                t.obs, t.action, r, t.next_obs, t.done,
                 goal_at_s, goal_at_sp,
                 motion=t.motion_prev, next_motion=t.motion_next,
             )
@@ -129,13 +153,13 @@ class EpisodeBuffer:
                 # Pin penalty is goal-independent; a relabeled success (terminal)
                 # can't be a pin (reaching the goal required moving), so applying
                 # it before the done check is safe.
-                hindsight_reward += _blocked_penalty(t)
+                r = hindsight_reward + _blocked_penalty(t) + _spin_penalty(t, i)
                 hs_goal_at_s  = world_coords(t.achieved_prev[0], t.achieved_prev[1],
                                              hindsight_goal[0], hindsight_goal[1])
                 hs_goal_at_sp = world_coords(t.achieved_next[0], t.achieved_next[1],
                                              hindsight_goal[0], hindsight_goal[1])
                 replay_buffer.store_transition(
-                    t.obs, t.action, hindsight_reward, t.next_obs, hindsight_done,
+                    t.obs, t.action, r, t.next_obs, hindsight_done,
                     hs_goal_at_s, hs_goal_at_sp,
                     motion=t.motion_prev, next_motion=t.motion_next,
                 )

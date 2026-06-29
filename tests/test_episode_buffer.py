@@ -148,3 +148,50 @@ def test_send_to_original_reward_preserved():
 
     # First stored transition is the original — reward must be 7.0
     assert float(rep.reward_memory[0]) == 7.0
+
+
+def test_spin_penalty():
+    from episode_buffer import SPIN_PENALTY, BLOCKED_PENALTY
+    ep  = EpisodeBuffer()
+    rep = _make_replay()
+    obs = torch.zeros(3, 96, 96, dtype=torch.uint8)
+
+    # Store 8 dummy straight transitions so history is considered full (index >= 8)
+    motion_straight = np.zeros(12, dtype=np.float32)
+    motion_straight[8 + 3] = 1.0  # net_disp = 1.0
+    for i in range(8):
+        ep.store(obs, 0, 0.0, obs, False,
+                 achieved_prev=_pos(i*10, 0), achieved_next=_pos((i+1)*10, 0),
+                 motion_prev=motion_straight)
+
+    # 8: Straight line (no penalty)
+    ep.store(obs, 0, 0.0, obs, False,
+             achieved_prev=_pos(80, 0), achieved_next=_pos(90, 0),
+             motion_prev=motion_straight)
+
+    # 9: Blocked pin (BLOCKED_PENALTY, no SPIN_PENALTY)
+    motion_blocked = np.zeros(12, dtype=np.float32)
+    ep.store(obs, 0, 0.0, obs, False,
+             achieved_prev=_pos(90, 0), achieved_next=_pos(90, 0),
+             motion_prev=motion_blocked)
+
+    # 10: Spin cycle (SPIN_PENALTY)
+    motion_spin = np.zeros(12, dtype=np.float32)
+    motion_spin[8 + 2] = 0.06
+    motion_spin[8 + 3] = 0.08  # net_disp = 0.1 < 0.25
+    ep.store(obs, 0, 0.0, obs, False,
+             achieved_prev=_pos(90, 0), achieved_next=_pos(94, 0),
+             motion_prev=motion_spin)
+
+    # Clear the replay buffer, send
+    ep.send_to(rep, _pos(1000, 1000), _dummy_compute_reward)
+
+    # Assertions
+    # 0 to 8: straight -> 0.0
+    import pytest
+    for idx in range(9):
+        assert float(rep.reward_memory[idx]) == pytest.approx(0.0), f"idx {idx} should have no penalty"
+    # 9: blocked -> BLOCKED_PENALTY
+    assert float(rep.reward_memory[9]) == pytest.approx(BLOCKED_PENALTY)
+    # 10: spin -> SPIN_PENALTY
+    assert float(rep.reward_memory[10]) == pytest.approx(SPIN_PENALTY)
