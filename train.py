@@ -20,7 +20,7 @@ import homebot
 # chained_eval.py + spin_metric. her_anneal_start=None keeps HER's dense relabel
 # grounding the whole run (the tight 31px target needs it).
 CARDINAL_ONLY = False  # Set to True to restrict action space to N, E, S, W (Up/Down/Left/Right)
-FRAME_SKIP = 1         # Set to 2 for 2-step frameskip (action repeat)
+FRAME_SKIP = 2         # Set to 2 for 2-step frameskip (action repeat)
 
 env = gym.make(
     "HomeBot2D-Goal-V1",
