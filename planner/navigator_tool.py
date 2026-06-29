@@ -17,7 +17,8 @@ from planner.world_model import WorldModel, DEST_TO_ENV
 class NavigatorTool:
     def __init__(self, checkpoint="checkpoints/run325_q_model_best.pt",
                  readout="softmax_rel", temp=0.1, device=None,
-                 render_mode="rgb_array", head_norm=False):
+                 render_mode="rgb_array", head_norm=False,
+                 cardinal_only=False):
         # render_mode="human" opens a window and auto-shows every step (the env's
         # _get_obs draws to the window in human mode) -- used by the chat REPL so
         # you can watch the robot drive. Default "rgb_array" stays headless for
@@ -31,6 +32,9 @@ class NavigatorTool:
             "HomeBot2D-V1", render_mode=render_mode, action_mode="discrete",
             obs_resolution=(96, 96), n_trash=2, max_steps=20000,
             map_name="default", random_start=True)
+        if cardinal_only:
+            from cardinal_wrapper import CardinalActionWrapper
+            self.env = CardinalActionWrapper(self.env)
         self.base = self.env.unwrapped
         self.world = WorldModel(self.env)
         self.model = load_q_model(
@@ -60,7 +64,10 @@ class NavigatorTool:
         reach = REACH_OVERRIDE.get(env_name, GOAL_THRESHOLD)
         before = self.world.state()
         r = self.base._robot
-        budget = max(1, int(eval_step_budget(distance(r.x, r.y, gx, gy))))
+        if env_name == "collect_trash":
+            budget = 600
+        else:
+            budget = max(1, int(eval_step_budget(distance(r.x, r.y, gx, gy))))
 
         # run_leg returns (reached, steps, obs, positions); the positions trace is
         # only for the spin metric, so discard it here.

@@ -319,6 +319,9 @@ class Agent:
                 obs_resolution=(96, 96), n_trash=2, max_steps=20000,
                 map_name="default", random_start=True,
             )
+            if self.n_actions == 4:
+                from cardinal_wrapper import CardinalActionWrapper
+                self._chain_env = CardinalActionWrapper(self._chain_env)
         self.q_model.eval()
         n_legs = len(DEFAULT_CHAIN)
         # A soft-Q model is meant to be used stochastically; score it the way it

@@ -21,6 +21,8 @@ def main():
     parser.add_argument("--readout", default="greedy", choices=["greedy", "softmax", "softmax_rel"])
     parser.add_argument("--temp", type=float, default=0.01)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--cardinal-only", action="store_true", default=False,
+                        help="restrict the action space to 4 cardinal directions")
     parser.add_argument("--render-mode", default="human")
     args = parser.parse_args()
 
@@ -37,6 +39,10 @@ def main():
         map_name="default",
         random_start=True,
     )
+
+    if args.cardinal_only:
+        from cardinal_wrapper import CardinalActionWrapper
+        env = CardinalActionWrapper(env)
 
     n_actions = env.action_space.n
     model = load_q_model(

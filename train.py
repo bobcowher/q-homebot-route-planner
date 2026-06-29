@@ -19,6 +19,8 @@ import homebot
 # Clean A/B vs 314 (4.30/38% chain, 5.8% deploy spin) on the collect_trash leg:
 # chained_eval.py + spin_metric. her_anneal_start=None keeps HER's dense relabel
 # grounding the whole run (the tight 31px target needs it).
+CARDINAL_ONLY = True  # Set to True to restrict action space to N, E, S, W (Up/Down/Left/Right)
+
 env = gym.make(
     "HomeBot2D-Goal-V1",
     render_mode="rgb_array",
@@ -30,6 +32,10 @@ env = gym.make(
     goals=["collect_trash"],
     random_start=True,   # env owns spawn (uniform valid tile, >=60px from goals)
 )
+
+if CARDINAL_ONLY:
+    from cardinal_wrapper import CardinalActionWrapper
+    env = CardinalActionWrapper(env)
 
 agent = Agent(env=env, max_buffer_size=200000, goal_layers=2, head_layers=4,
               use_motion=True, motion_window=8, random_goal_tiles=True)
