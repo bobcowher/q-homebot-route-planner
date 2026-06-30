@@ -160,6 +160,8 @@ def main():
                    choices=["greedy", "softmax", "softmax_rel"],
                    help="action readout; macro models work at greedy (greedy==deploy)")
     p.add_argument("--temp", type=float, default=0.1, help="readout temperature")
+    p.add_argument("--frame-skip", type=int, default=2,
+                   help="number of frames to skip (action repeat)")
     args = p.parse_args()
 
     from planner.navigator_tool import NavigatorTool
@@ -178,7 +180,7 @@ def main():
 
     nav = NavigatorTool(checkpoint=args.checkpoint, readout=args.readout,
                         temp=args.temp, render_mode=args.render_mode,
-                        head_norm=args.head_norm)
+                        head_norm=args.head_norm, frame_skip=args.frame_skip)
     agent = PlannerAgent(LLMClient(base_url=args.base_url, model=args.model), nav,
                          trace=trace)
     try:
