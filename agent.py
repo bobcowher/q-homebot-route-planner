@@ -142,6 +142,10 @@ class Agent:
         self.updates_per_step = 1
 
         self.best_chain_score = -1.0
+        self.best_chain_spin = float('inf')
+        self.best_chain_steps = float('inf')
+        self._score_history = []
+        self._steps_history = []
 
         # Lazily-built non-goal env for the chained task-score metric (the real
         # deployment metric: trash>>fridge>>human>>door>>human, score out of N).
@@ -335,19 +339,22 @@ class Agent:
         temp = self.soft_alpha if self.soft_q else 0.01
         move_min, net_max = spin_thresholds(SPIN_WINDOW)
         total, full = 0, 0
+        total_steps = 0
         spins = []
         for i in range(n_episodes):
             legs = run_chain(self.q_model, self._chain_env, DEFAULT_CHAIN,
                              self.device, readout, temp, seed=i)
             reached = sum(1 for _, r, *_ in legs if r)
             total += reached
+            total_steps += sum(steps for _, _, steps, _ in legs)
             if reached == n_legs:
                 full += 1
             spins.extend(spin_fraction(pos, SPIN_WINDOW, move_min, net_max)
                          for _, _, _, pos in legs)
         self.q_model.train()
         mean_spin = sum(spins) / len(spins) if spins else 0.0
-        return total / n_episodes, full / n_episodes, mean_spin
+        mean_steps = total_steps / n_episodes
+        return total / n_episodes, full / n_episodes, mean_spin, mean_steps
 
     def train(self, episodes=1000, batch_size=64, run_tag=None,
               eval_interval=50, eval_episodes=20, chain_eval_interval=10,
@@ -504,16 +511,42 @@ class Agent:
             # the criterion for the "best" checkpoint (greedy reach_rate selected
             # the wrong models: it's a weaker readout than what we deploy on).
             if episode % chain_eval_interval == 0:
-                chain_score, chain_full, chain_spin = self.chain_eval()
+                chain_score, chain_full, chain_spin, chain_steps = self.chain_eval()
                 writer.add_scalar("Eval/chain_score", chain_score, episode)
                 writer.add_scalar("Eval/chain_full", chain_full, episode)
                 writer.add_scalar("Eval/chain_spin_fraction", chain_spin, episode)
+                writer.add_scalar("Eval/chain_steps", chain_steps, episode)
                 print(f"  [Chain] episode {episode}: score={chain_score:.2f}/"
                       f"{len(DEFAULT_CHAIN)} | full_chain={chain_full:.2f} | "
-                      f"spin={chain_spin:.3f}")
+                      f"spin={chain_spin:.3f} | steps={chain_steps:.1f}")
 
-                if chain_score > self.best_chain_score:
-                    self.best_chain_score = chain_score
+                # Update running histories
+                self._score_history.append(chain_score)
+                self._steps_history.append(chain_steps)
+                if len(self._score_history) > 3:
+                    self._score_history.pop(0)
+                    self._steps_history.pop(0)
+
+                # Compute running averages
+                avg_score = sum(self._score_history) / len(self._score_history)
+                avg_steps = sum(self._steps_history) / len(self._steps_history)
+
+                # Save best logic using running averages
+                is_best = False
+                if avg_score > self.best_chain_score:
+                    is_best = True
+                elif avg_score == self.best_chain_score:
+                    # Tie-breaker 1: prefer lower steps (faster)
+                    if avg_steps < self.best_chain_steps:
+                        is_best = True
+                    # Tie-breaker 2: prefer lower spin fraction (smoother)
+                    elif avg_steps == self.best_chain_steps and chain_spin < self.best_chain_spin:
+                        is_best = True
+
+                if is_best:
+                    self.best_chain_score = avg_score
+                    self.best_chain_steps = avg_steps
+                    self.best_chain_spin = chain_spin
                     self.save_best(episode, chain_score)
 
     def test(self, episodes=10):
