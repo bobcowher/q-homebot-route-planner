@@ -351,7 +351,7 @@ class Agent:
 
     def train(self, episodes=1000, batch_size=64, run_tag=None,
               eval_interval=50, eval_episodes=20, chain_eval_interval=10,
-              her_anneal_start=None,
+              her_anneal_start=None, her_anneal_span=None,
               reach_start=None, reach_end=None,
               reach_anneal_start=0, reach_anneal_end=None):
         # Success-radius curriculum: when reach_start is set, the per-episode reach/
@@ -460,7 +460,7 @@ class Agent:
             # real (un-relabeled) data — like a fine-tune off the relabeled diet.
             k_eff = self.episode_buffer.K
             if her_anneal_start is not None and episode >= her_anneal_start:
-                span = max(1, episodes - her_anneal_start)
+                span = her_anneal_span if her_anneal_span is not None else max(1, episodes - her_anneal_start)
                 frac = min(1.0, (episode - her_anneal_start) / span)
                 k_eff = self.episode_buffer.K * (1.0 - frac)
             # HER reward: curriculum radius when enabled (so relabeled goals score at

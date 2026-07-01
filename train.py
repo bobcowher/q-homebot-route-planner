@@ -45,5 +45,5 @@ if FRAME_SKIP > 1:
 agent = Agent(env=env, max_buffer_size=200000, goal_layers=2, head_layers=4,
               use_motion=True, motion_window=8, random_goal_tiles=True)
 
-agent.train(episodes=1800, batch_size=64, eval_interval=50, eval_episodes=20,
-            chain_eval_interval=10, her_anneal_start=None)
+agent.train(episodes=4500, batch_size=64, eval_interval=50, eval_episodes=20,
+            chain_eval_interval=10, her_anneal_start=500, her_anneal_span=500)
