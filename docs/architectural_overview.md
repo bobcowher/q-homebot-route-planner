@@ -62,9 +62,9 @@ Goal-conditioned RL relies on **Hindsight Experience Replay (HER)** to combat sp
 
 *   **The Collapse of Constant $K=4$**: Setting a high hindsight rate of $K=4$ (80% of the replay buffer is relabeled data) for the entire run causes **policy collapse**. The network overfits to reaching arbitrary local coordinates and fails to specialize in the long-range paths required for the final sparse target coordinates (the door/fridge).
 *   **The Annealing Solution**: To reap the benefits of dense spatial learning without suffering from policy collapse, we use an **annealing curriculum** (`her_anneal_start`):
-    *   **Bootstrap Phase (Episodes 0 – $T_\text{anneal}$)**: Train with a high hindsight rate ($K=4$) to rapidly map the global obstacle geometry of the house.
-    *   **Specialization Phase (Episodes $T_\text{anneal}$ – $T_\text{max}$)**: Gradually anneal $K$ from $4$ down to $0$. This shifts the replay buffer's inflow to 100% real desired goals, forcing the policy to lock onto and specialize in the exact coordinates of the deployment chain.
-    *   *Empirical Note*: Because the policy reaches peak general capability early, starting the annealing at **episode 400** (out of 1800) is optimal to prevent the onset of late-stage regression.
+    *   **Bootstrap Phase (Episodes 0 – $T_\text{anneal}$)**: Train with hindsight ($K=2$ or $K=4$) to rapidly map the global obstacle geometry of the house.
+    *   **Specialization Phase (Episodes $T_\text{anneal}$ – $T_\text{max}$)**: Gradually anneal $K$ down to $0$. This shifts the replay buffer's inflow to 100% real desired goals.
+    *   **The Buffer Flushing Requirement (Run 411 - The Champion)**: Because the replay buffer is large ($200,000$ transitions) and a frameskip-2 episode is short ($\sim 50$ steps), the buffer remains $\sim 85\%$ dominated by old HER transitions even after $K$ reaches $0$. By running a longer training run of **4,500 episodes** with early annealing (500 $\rightarrow$ 1000), the replay buffer completely flushes out the historical HER data. This allowed the policy to fully ground itself on real data, achieving a **100% success rate on the door and fridge**, an **83.3% smoothed full-chain success rate** (our highest ever), and a **4.4% smoothed spin fraction** (our lowest ever).
 
 ---
 
@@ -89,7 +89,8 @@ To mathematically measure "spinning" (limit cycles where the robot moves but mak
 $$\text{Spin Fraction} = \frac{\sum_{t} \mathbb{I}(\text{Net Displacement}_t < \epsilon)}{\text{Total Steps}}$$
 A high-quality policy must maintain a spin fraction below **10%**.
 
-### C. Best Checkpoint Selection with Tie-Breakers
-To protect against late-stage policy regression, we save a running `q_model_best.pt`.
-1.  **Primary Criterion**: Highest `chain_score`.
-2.  **Secondary Criterion (Tie-Breaker)**: If scores are equal, we save the new checkpoint **only if** its `chain_spin_fraction` is strictly lower. This ensures the checkpoint selection actively optimizes for visual smoothness.
+### C. Best Checkpoint Selection with Running Averages & Tie-Breakers
+To protect against late-stage policy regression and sample variance (where a weak model gets a lucky perfect evaluation score over a small 5-episode sample), we save a running `q_model_best.pt` using a **3-evaluation running average**:
+1.  **Primary Criterion**: Highest running average of the evaluation score (`avg_score`).
+2.  **Tie-Breaker 1 (Steps)**: If scores are equal, we save only if the running average of the step counts (`avg_steps`) is strictly lower (favoring faster paths).
+3.  **Tie-Breaker 2 (Spin)**: If steps are also equal, we save only if the evaluation's spin fraction is strictly lower (favoring visual smoothness).
