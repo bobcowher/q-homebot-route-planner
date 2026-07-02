@@ -18,7 +18,8 @@ class NavigatorTool:
     def __init__(self, checkpoint="checkpoints/q_model_best.pt",
                  readout="softmax_rel", temp=0.1, device=None,
                  render_mode="rgb_array", head_norm=False,
-                 cardinal_only=False, frame_skip=1):
+                 cardinal_only=False, frame_skip=1,
+                 motion_window=8, motion_mlp=True):
         # render_mode="human" opens a window and auto-shows every step (the env's
         # _get_obs draws to the window in human mode) -- used by the chat REPL so
         # you can watch the robot drive. Default "rgb_array" stays headless for
@@ -42,7 +43,9 @@ class NavigatorTool:
         self.world = WorldModel(self.env)
         self.model = load_q_model(
             checkpoint, self.env.action_space.n, self.device,
-            goal_layers=2, head_layers=4, use_motion=True, head_norm=head_norm)
+            goal_layers=2, head_layers=4, use_motion=True,
+            motion_window=motion_window, motion_mlp=motion_mlp,
+            head_norm=head_norm)
         self.readout, self.temp = readout, temp
         self.obs = None
         self.ms = None
@@ -50,7 +53,7 @@ class NavigatorTool:
     def reset(self, seed=None) -> dict:
         raw, _ = self.env.reset(seed=seed)
         self.obs = process_observation(raw)
-        self.ms = MotionState(self.env.action_space.n)
+        self.ms = MotionState(self.env.action_space.n, getattr(self.model, "motion_window", 1))
         return self.world.state()
 
     def state(self) -> dict:
