@@ -34,7 +34,8 @@ class Agent:
                        soft_alpha: float = 0.01,
                        softmax_behavior: bool = False,
                        softmax_behavior_temp: float = 0.1,
-                       macro_h: int = 1) -> None:
+                       macro_h: int = 1,
+                       save_checkpoints: bool = True) -> None:
         self.env = env
         # Soft-Q (entropy-regularized) value backup + softmax behavior policy.
         # Hard-Q greedy is a deterministic map over a deterministic env, so it can
@@ -55,14 +56,13 @@ class Agent:
         # action selection during rollout.
         self.softmax_behavior = softmax_behavior
         self.softmax_behavior_temp = softmax_behavior_temp
-        # When True, each episode's goal is a uniformly-sampled valid floor tile
-        # (whole-map coverage) instead of the env's trash/fixture goal — trains a
-        # navigator that reaches arbitrary commanded coords, not just trash spots.
         self.random_goal_tiles = random_goal_tiles
+        self.save_checkpoints = save_checkpoints
         self.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
-        os.makedirs("checkpoints", exist_ok=True)
-        os.makedirs("runs", exist_ok=True)
+        if self.save_checkpoints:
+            os.makedirs("checkpoints", exist_ok=True)
+            os.makedirs("runs", exist_ok=True)
 
         raw_obs, _ = self.env.reset()
         obs = self.process_observation(raw_obs["observation"])
@@ -249,13 +249,16 @@ class Agent:
         return loss.item()
 
     def save(self):
-        self.q_model.save_the_model("q_model", verbose=True)
+        if self.save_checkpoints:
+            self.q_model.save_the_model("q_model", verbose=True)
 
     def load(self):
         self.q_model.load_the_model("q_model", device=self.device)
         self.target_q_model.load_state_dict(self.q_model.state_dict())
 
     def save_best(self, episode, chain_score):
+        if not self.save_checkpoints:
+            return
         path = "checkpoints/q_model_best.pt"
         torch.save({
             "q_model": self.q_model.state_dict(),

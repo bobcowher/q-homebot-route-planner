@@ -17,6 +17,6 @@ def test_three_episode_train_runs_without_error():
         map_name="default",
         goals=["collect_trash"],
     )
-    agent = Agent(env=env, max_buffer_size=10000)
+    agent = Agent(env=env, max_buffer_size=10000, save_checkpoints=False)
     agent.train(episodes=3, batch_size=64)
     env.close()
