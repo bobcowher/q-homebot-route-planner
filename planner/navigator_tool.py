@@ -15,8 +15,8 @@ from planner.world_model import WorldModel, DEST_TO_ENV
 
 
 class NavigatorTool:
-    def __init__(self, checkpoint="checkpoints/run325_q_model_best.pt",
-                 readout="softmax_rel", temp=0.1, device=None,
+    def __init__(self, checkpoint="checkpoints/q_model_best.pt",
+                 readout="softmax_rel", temp=0.05, device=None,
                  render_mode="rgb_array", head_norm=False,
                  cardinal_only=False, frame_skip=1):
         # render_mode="human" opens a window and auto-shows every step (the env's

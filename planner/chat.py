@@ -152,14 +152,14 @@ def main():
     p.add_argument("--render-mode", default="human", choices=["human", "rgb_array"],
                    help="human opens a window so you can watch the robot drive")
     p.add_argument("--log-dir", default="logs", help="where to write the chat log")
-    p.add_argument("--checkpoint", default="checkpoints/run325_q_model_best.pt",
+    p.add_argument("--checkpoint", default="checkpoints/q_model_best.pt",
                    help="navigator checkpoint to drive (e.g. a macro-action model)")
     p.add_argument("--head-norm", action="store_true",
                    help="required for LayerNorm checkpoints (the macro-action runs)")
     p.add_argument("--readout", default="softmax_rel",
                    choices=["greedy", "softmax", "softmax_rel"],
                    help="action readout; macro models work at greedy (greedy==deploy)")
-    p.add_argument("--temp", type=float, default=0.1, help="readout temperature")
+    p.add_argument("--temp", type=float, default=0.05, help="readout temperature")
     p.add_argument("--frame-skip", type=int, default=2,
                    help="number of frames to skip (action repeat)")
     args = p.parse_args()
