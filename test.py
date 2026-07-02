@@ -9,7 +9,7 @@ from task_chain import DEFAULT_CHAIN
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", default="checkpoints/q_model.pt")
+    parser.add_argument("--checkpoint", default="checkpoints/q_model_best.pt")
     parser.add_argument("--goal-layers", type=int, default=2)
     parser.add_argument("--head-layers", type=int, default=4)
     parser.add_argument("--use-motion", action="store_true", default=True,
