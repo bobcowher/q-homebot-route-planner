@@ -18,8 +18,8 @@ def main():
     parser.add_argument("--use-projection", action="store_true", default=True)
     parser.add_argument("--motion-mlp", action="store_true", default=True)
     parser.add_argument("--episodes", type=int, default=3)
-    parser.add_argument("--readout", default="softmax_rel", choices=["greedy", "softmax", "softmax_rel"])
-    parser.add_argument("--temp", type=float, default=0.05)
+    parser.add_argument("--readout", default="greedy", choices=["greedy", "softmax", "softmax_rel"])
+    parser.add_argument("--temp", type=float, default=0.01)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--cardinal-only", action="store_true", default=False,
                         help="restrict the action space to 4 cardinal directions")

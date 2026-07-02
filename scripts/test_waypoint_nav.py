@@ -74,10 +74,12 @@ def main():
     env = gym.make("HomeBot2D-V1", render_mode="rgb_array", action_mode="discrete",
                    obs_resolution=(96, 96), n_trash=2, max_steps=20000,
                    map_name="default", random_start=True)
+    from env_wrappers import FrameSkipWrapper
+    env = FrameSkipWrapper(env, skip=2)
     base = env.unwrapped
     model = load_q_model(args.checkpoint, env.action_space.n, device,
                          goal_layers=2, head_layers=4, head_norm=args.head_norm,
-                         use_motion=True)
+                         use_motion=True, motion_window=8, motion_mlp=True)
 
     d_reach = w_reach = 0
     for seed in range(args.episodes):

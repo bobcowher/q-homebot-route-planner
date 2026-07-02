@@ -159,7 +159,7 @@ def main():
     p.add_argument("--readout", default="softmax_rel",
                    choices=["greedy", "softmax", "softmax_rel"],
                    help="action readout; macro models work at greedy (greedy==deploy)")
-    p.add_argument("--temp", type=float, default=0.05, help="readout temperature")
+    p.add_argument("--temp", type=float, default=0.1, help="readout temperature")
     p.add_argument("--frame-skip", type=int, default=2,
                    help="number of frames to skip (action repeat)")
     args = p.parse_args()
