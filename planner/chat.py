@@ -148,7 +148,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--base-url", default="http://localhost:11434/v1")
     p.add_argument("--model", default="qwen2.5:14b-instruct")
-    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--seed", type=int, default=44)
     p.add_argument("--render-mode", default="human", choices=["human", "rgb_array"],
                    help="human opens a window so you can watch the robot drive")
     p.add_argument("--log-dir", default="logs", help="where to write the chat log")
